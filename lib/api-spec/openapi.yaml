@@ -1,22 +1,26 @@
-openapi: 3.1.0
+openapi: "3.1.0"
 info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.1.0
-  description: API specification
+  version: "1.0.0"
+  description: Optimal Dump Packing API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: pack
+    description: Packing optimization
+  - name: analysis
+    description: Density analysis
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +28,419 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /v1/pack/presets:
+    get:
+      operationId: getPresets
+      tags: [pack]
+      summary: Get truck presets and simulation polygons
+      responses:
+        "200":
+          description: Presets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresetsResponse"
+
+  /v1/pack:
+    post:
+      operationId: generatePack
+      tags: [pack]
+      summary: Generate optimized dump packing plan from local coordinates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PackInput"
+      responses:
+        "200":
+          description: Optimized packing plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackingPlan"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /v1/pack/gps:
+    post:
+      operationId: generatePackGps
+      tags: [pack]
+      summary: Generate optimized dump packing plan from GPS coordinates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GpsPackInput"
+      responses:
+        "200":
+          description: Optimized packing plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackingPlan"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /v1/pack/export:
+    post:
+      operationId: exportPlan
+      tags: [pack]
+      summary: Export dump plan as structured JSON
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportInput"
+      responses:
+        "200":
+          description: Exportable dump plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportResult"
+
+  /v1/analysis/benchmark:
+    get:
+      operationId: getBenchmark
+      tags: [analysis]
+      summary: Performance benchmark comparing hex vs square grid packing
+      responses:
+        "200":
+          description: Benchmark results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenchmarkResult"
+
+  /v1/analysis/density-gap:
+    get:
+      operationId: getDensityGap
+      tags: [analysis]
+      summary: Density gap metrics between autonomous and staffed operations
+      responses:
+        "200":
+          description: Density gap analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DensityGapResult"
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    Coordinate:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+
+    GpsCoordinate:
+      type: object
+      required: [lat, lng]
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+
+    TruckProfile:
+      type: object
+      required: [id, name, width, length, turningRadius, spacingX, spacingY, payloadTonnes]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        width:
+          type: number
+        length:
+          type: number
+        turningRadius:
+          type: number
+        spacingX:
+          type: number
+        spacingY:
+          type: number
+        payloadTonnes:
+          type: number
+
+    SpotPoint:
+      type: object
+      required: [id, x, y, laneId, sequenceInLane, globalSequence, zoneId, rotation, safe]
+      properties:
+        id:
+          type: integer
+        x:
+          type: number
+        y:
+          type: number
+        laneId:
+          type: integer
+        sequenceInLane:
+          type: integer
+        globalSequence:
+          type: integer
+        zoneId:
+          type: integer
+        rotation:
+          type: number
+        safe:
+          type: boolean
+
+    Lane:
+      type: object
+      required: [id, spotIds, approachAngle]
+      properties:
+        id:
+          type: integer
+        spotIds:
+          type: array
+          items:
+            type: integer
+        approachAngle:
+          type: number
+
+    RotationScore:
+      type: object
+      required: [angle, spotCount]
+      properties:
+        angle:
+          type: number
+        spotCount:
+          type: integer
+
+    DensityMetrics:
+      type: object
+      required: [spotCount, squareGridCount, improvementPercent, utilizationEfficiency, hexPackEfficiency, squarePackEfficiency, insetArea, totalArea]
+      properties:
+        spotCount:
+          type: integer
+        squareGridCount:
+          type: integer
+        improvementPercent:
+          type: number
+        utilizationEfficiency:
+          type: number
+        hexPackEfficiency:
+          type: number
+        squarePackEfficiency:
+          type: number
+        insetArea:
+          type: number
+        totalArea:
+          type: number
+
+    PackingPlan:
+      type: object
+      required: [spots, lanes, polygon, insetPolygon, bestRotation, metrics, truckProfile, generatedAt]
+      properties:
+        spots:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpotPoint"
+        lanes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Lane"
+        polygon:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+        insetPolygon:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+        bestRotation:
+          type: number
+        rotationScores:
+          type: array
+          items:
+            $ref: "#/components/schemas/RotationScore"
+        metrics:
+          $ref: "#/components/schemas/DensityMetrics"
+        truckProfile:
+          $ref: "#/components/schemas/TruckProfile"
+        generatedAt:
+          type: string
+
+    PackInput:
+      type: object
+      required: [polygon, truckProfileId]
+      properties:
+        polygon:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+          minItems: 3
+        truckProfileId:
+          type: string
+        customTruck:
+          $ref: "#/components/schemas/TruckProfile"
+        ingressAngle:
+          type: number
+        rotationStep:
+          type: number
+
+    GpsPackInput:
+      type: object
+      required: [gpsPolygon, truckProfileId]
+      properties:
+        gpsPolygon:
+          type: array
+          items:
+            $ref: "#/components/schemas/GpsCoordinate"
+          minItems: 3
+        truckProfileId:
+          type: string
+        customTruck:
+          $ref: "#/components/schemas/TruckProfile"
+        ingressAngle:
+          type: number
+        rotationStep:
+          type: number
+
+    ExportInput:
+      type: object
+      required: [plan]
+      properties:
+        plan:
+          $ref: "#/components/schemas/PackingPlan"
+        format:
+          type: string
+
+    ExportResult:
+      type: object
+      required: [filename, data, generatedAt]
+      properties:
+        filename:
+          type: string
+        data:
+          type: object
+        generatedAt:
+          type: string
+
+    BenchmarkScenario:
+      type: object
+      required: [polygonName, truckId, hexSpots, squareSpots, improvementPercent, bestRotation]
+      properties:
+        polygonName:
+          type: string
+        truckId:
+          type: string
+        hexSpots:
+          type: integer
+        squareSpots:
+          type: integer
+        improvementPercent:
+          type: number
+        bestRotation:
+          type: number
+
+    BenchmarkResult:
+      type: object
+      required: [scenarios, summary]
+      properties:
+        scenarios:
+          type: array
+          items:
+            $ref: "#/components/schemas/BenchmarkScenario"
+        summary:
+          type: object
+          required: [avgImprovementPercent, maxImprovementPercent, testedTrucks]
+          properties:
+            avgImprovementPercent:
+              type: number
+            maxImprovementPercent:
+              type: number
+            testedTrucks:
+              type: array
+              items:
+                type: string
+
+    KpiItem:
+      type: object
+      required: [label, before, after, unit]
+      properties:
+        label:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
+        unit:
+          type: string
+
+    DensityGapResult:
+      type: object
+      required: [autonomousSpacing, staffedSpacing, densityGapRatio, rootCause, innovationDescription, kpis]
+      properties:
+        autonomousSpacing:
+          type: number
+        staffedSpacing:
+          type: number
+        densityGapRatio:
+          type: number
+        rootCause:
+          type: string
+        innovationDescription:
+          type: string
+        kpis:
+          type: array
+          items:
+            $ref: "#/components/schemas/KpiItem"
+
+    SimulationPolygon:
+      type: object
+      required: [id, name, polygon, description]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        polygon:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coordinate"
+        description:
+          type: string
+
+    PresetsResponse:
+      type: object
+      required: [truckProfiles, simulationPolygons]
+      properties:
+        truckProfiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/TruckProfile"
+        simulationPolygons:
+          type: array
+          items:
+            $ref: "#/components/schemas/SimulationPolygon"
