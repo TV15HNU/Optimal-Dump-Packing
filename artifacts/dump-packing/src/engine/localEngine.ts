@@ -133,7 +133,7 @@ function bbox(pts: Poly) {
   return { minX, minY, maxX, maxY };
 }
 
-function hexGrid(inset: Poly, sx: number, sy: number, angleDeg: number): Pt[] {
+function hexGridAtAngle(inset: Poly, sx: number, sy: number, angleDeg: number): Pt[] {
   if (inset.length < 3) return [];
   const c = centroid(inset);
   const rad = -(angleDeg * Math.PI) / 180;
@@ -162,6 +162,58 @@ function squareGrid(inset: Poly, sx: number, sy: number): number {
   return count;
 }
 
+function buildSpotsFromPoints(pts: Pt[], inset: Poly, angleDeg: number, spacingX: number): { spots: SpotLocal[]; lanes: LaneLocal[] } {
+  const bb = inset.length > 2 ? bbox(inset) : { minX: 0, maxX: 1, minY: 0, maxY: 1 };
+  const laneWidth = Math.max((bb.maxX - bb.minX) / Math.max(pts.length / 4, 1), spacingX * 1.5);
+
+  const spots: SpotLocal[] = pts.map((p, i) => ({
+    id: i, x: p.x, y: p.y,
+    laneId: Math.max(0, Math.floor((p.x - bb.minX) / laneWidth)),
+    sequenceInLane: 0, globalSequence: 0, zoneId: 0, rotation: angleDeg, safe: true,
+  }));
+
+  const laneMap = new Map<number, SpotLocal[]>();
+  for (const s of spots) {
+    if (!laneMap.has(s.laneId)) laneMap.set(s.laneId, []);
+    laneMap.get(s.laneId)!.push(s);
+  }
+
+  const lanes: LaneLocal[] = [];
+  let globalSeq = 0;
+  const laneIds = Array.from(laneMap.keys()).sort((a, b) => a - b);
+  for (const lid of laneIds) {
+    const ls = laneMap.get(lid)!.sort((a, b) => b.y - a.y);
+    ls.forEach((s, i) => { s.sequenceInLane = i; });
+    lanes.push({ id: lid, spotIds: ls.map((s) => s.id), approachAngle: 90 });
+  }
+  const maxL = Math.max(...lanes.map((l) => l.spotIds.length), 0);
+  for (let i = 0; i < maxL; i++) {
+    for (const lid of laneIds) {
+      const ls = laneMap.get(lid)!;
+      if (i < ls.length) ls[i].globalSequence = globalSeq++;
+    }
+  }
+  return { spots, lanes };
+}
+
+/** Run packing at a single fixed angle — for animation sweep */
+export function runAtAngle(polygon: Poly, truck: TruckConfig, angleDeg: number): LocalPackResult {
+  const inset = insetPoly(polygon, truck.turningRadius);
+  const totalArea = polyArea(polygon);
+  const insetArea = polyArea(inset);
+  const pts = hexGridAtAngle(inset, truck.spacingX, truck.spacingY, angleDeg);
+  const { spots, lanes } = buildSpotsFromPoints(pts, inset, angleDeg, truck.spacingX);
+  const squareCount = squareGrid(inset, truck.spacingX, truck.spacingY);
+  const spotArea = Math.PI * Math.pow(truck.width / 2, 2);
+  const util = insetArea > 0 ? (pts.length * spotArea) / insetArea : 0;
+  const improvement = squareCount > 0 ? ((pts.length - squareCount) / squareCount) * 100 : 0;
+  return {
+    spots, lanes, polygon, insetPolygon: inset,
+    bestRotation: angleDeg, rotationScores: [{ angle: angleDeg, spotCount: pts.length }],
+    metrics: { spotCount: pts.length, squareGridCount: squareCount, improvementPercent: improvement, utilizationEfficiency: util, hexPackEfficiency: 0.9069, squarePackEfficiency: 0.7854, insetArea, totalArea },
+  };
+}
+
 export function runLocalEngine(polygon: Poly, truck: TruckConfig, rotStep = 5): LocalPackResult {
   if (polygon.length < 3) {
     return {
@@ -179,44 +231,13 @@ export function runLocalEngine(polygon: Poly, truck: TruckConfig, rotStep = 5): 
   let bestAngle = 0, bestCount = 0, bestPts: Pt[] = [];
 
   for (let a = 0; a < 60; a += rotStep) {
-    const pts = hexGrid(inset, truck.spacingX, truck.spacingY, a);
+    const pts = hexGridAtAngle(inset, truck.spacingX, truck.spacingY, a);
     scores.push({ angle: a, spotCount: pts.length });
     if (pts.length > bestCount) { bestCount = pts.length; bestAngle = a; bestPts = pts; }
   }
 
   const squareCount = squareGrid(inset, truck.spacingX, truck.spacingY);
-  const bb = bbox(inset.length > 2 ? inset : polygon);
-  const laneWidth = Math.max((bb.maxX - bb.minX) / Math.max(bestPts.length / 4, 1), truck.spacingX * 1.5);
-
-  const spots: SpotLocal[] = bestPts.map((p, i) => ({
-    id: i, x: p.x, y: p.y,
-    laneId: Math.max(0, Math.floor((p.x - bb.minX) / laneWidth)),
-    sequenceInLane: 0, globalSequence: 0, zoneId: 0, rotation: bestAngle, safe: true,
-  }));
-
-  const laneMap = new Map<number, SpotLocal[]>();
-  for (const s of spots) {
-    if (!laneMap.has(s.laneId)) laneMap.set(s.laneId, []);
-    laneMap.get(s.laneId)!.push(s);
-  }
-
-  const lanes: LaneLocal[] = [];
-  let globalSeq = 0;
-  const laneIds = Array.from(laneMap.keys()).sort((a, b) => a - b);
-  for (const lid of laneIds) {
-    const ls = laneMap.get(lid)!.sort((a, b) => b.y - a.y);
-    ls.forEach((s, i) => { s.sequenceInLane = i; });
-    lanes.push({ id: lid, spotIds: ls.map((s) => s.id), approachAngle: 90 });
-  }
-  // Round-robin global sequencing
-  const maxL = Math.max(...lanes.map((l) => l.spotIds.length), 0);
-  for (let i = 0; i < maxL; i++) {
-    for (const lid of laneIds) {
-      const ls = laneMap.get(lid)!;
-      if (i < ls.length) ls[i].globalSequence = globalSeq++;
-    }
-  }
-
+  const { spots, lanes } = buildSpotsFromPoints(bestPts, inset, bestAngle, truck.spacingX);
   const spotArea = Math.PI * Math.pow(truck.width / 2, 2);
   const util = insetArea > 0 ? (bestCount * spotArea) / insetArea : 0;
   const improvement = squareCount > 0 ? ((bestCount - squareCount) / squareCount) * 100 : 0;
@@ -224,18 +245,13 @@ export function runLocalEngine(polygon: Poly, truck: TruckConfig, rotStep = 5): 
   return {
     spots, lanes, polygon, insetPolygon: inset,
     bestRotation: bestAngle, rotationScores: scores,
-    metrics: {
-      spotCount: bestCount, squareGridCount: squareCount,
-      improvementPercent: improvement, utilizationEfficiency: util,
-      hexPackEfficiency: 0.9069, squarePackEfficiency: 0.7854,
-      insetArea, totalArea,
-    },
+    metrics: { spotCount: bestCount, squareGridCount: squareCount, improvementPercent: improvement, utilizationEfficiency: util, hexPackEfficiency: 0.9069, squarePackEfficiency: 0.7854, insetArea, totalArea },
   };
 }
 
+// Only 3 trucks (Komatsu 930E removed)
 export const DEFAULT_TRUCKS: TruckConfig[] = [
   { id: "cat-793", name: "CAT 793", width: 9.14, length: 14.71, turningRadius: 12, spacingX: 13.5, spacingY: 13.5, payloadTonnes: 227 },
   { id: "cat-797f", name: "CAT 797F", width: 9.75, length: 15.09, turningRadius: 14.5, spacingX: 16, spacingY: 16, payloadTonnes: 363 },
   { id: "cat-789d", name: "CAT 789D", width: 8.43, length: 13.62, turningRadius: 11, spacingX: 12, spacingY: 12, payloadTonnes: 181 },
-  { id: "komatsu-930e", name: "Komatsu 930E", width: 9.4, length: 15.4, turningRadius: 13.5, spacingX: 15, spacingY: 15, payloadTonnes: 291 },
 ];

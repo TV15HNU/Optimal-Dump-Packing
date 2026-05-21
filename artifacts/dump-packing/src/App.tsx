@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from "framer-motion";
+import { PlanContextProvider } from "@/lib/planContext";
 import PlannerTab from "@/components/PlannerTab";
 import SimulationTab from "@/components/SimulationTab";
 import AnalyticsTab from "@/components/AnalyticsTab";
@@ -30,19 +31,17 @@ function Dashboard() {
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
       {/* Header */}
       <header className="flex items-center justify-between px-5 py-3 border-b border-border bg-card shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col">
-            <span className="text-sm font-bold text-foreground tracking-tight leading-none">
-              OPTIMAL DUMP PACKING
-            </span>
-            <span className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase leading-tight mt-0.5">
-              Adaptive Polygon Spot-Point Packing
-            </span>
-          </div>
+        <div className="flex flex-col">
+          <span className="text-sm font-bold text-foreground tracking-tight leading-none">
+            OPTIMAL DUMP PACKING
+          </span>
+          <span className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase leading-tight mt-0.5">
+            Adaptive Polygon Spot-Point Packing
+          </span>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground font-mono">
           <span className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"></span>
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
             Engine Online
           </span>
           <span className="text-muted-foreground/40">|</span>
@@ -60,9 +59,7 @@ function Dashboard() {
             onClick={() => setActiveTab(tab.id)}
             data-testid={`tab-${tab.id}`}
             className={`relative px-4 py-2 text-xs font-medium transition-colors rounded-t outline-none ${
-              activeTab === tab.id
-                ? "text-primary"
-                : "text-muted-foreground hover:text-foreground"
+              activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {tab.label}
@@ -102,10 +99,12 @@ function Dashboard() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Dashboard />
-        <Toaster />
-      </TooltipProvider>
+      <PlanContextProvider>
+        <TooltipProvider>
+          <Dashboard />
+          <Toaster />
+        </TooltipProvider>
+      </PlanContextProvider>
     </QueryClientProvider>
   );
 }
