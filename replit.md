@@ -37,14 +37,15 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
 - Dual engine: server-side for final export, client-side (localEngine.ts) for instant preview
 - Hex packing: 60° symmetry → only 0–60° rotation sweep needed for full optimization
 - All geometry is pure TypeScript — no native deps, deterministic, testable
+- Gap-fill: post-processing second pass at winning angle fills boundary voids (step=0.46×spacing, clearance=0.88×spacing)
 
 ## Product
 
-- **Planner Tab**: Draw or load polygon, select truck, run hex packing, click spots for metadata
-- **Simulation Tab**: Watch dispatch animation lane-by-lane with progress tracking
-- **Analytics Tab**: Live benchmark vs square grid, density gap KPIs, rotation scores
-- **Map / GPS Tab**: Leaflet map, click to draw GPS polygon, sends to GPS API endpoint
-- **Export & Info Tab**: Download plan JSON, phase roadmap, system architecture, talking points
+- **Planner Tab**: Draw or load polygon, select truck, run hex packing, fill gaps, click spots for metadata, set entry/exit points
+- **Simulation Tab**: Watch farthest-first dispatch animation with progress tracking
+- **Analytics Tab**: Dual-mode (Planner | Map/GPS) live metrics with estimated fill time
+- **Map / GPS Tab**: Leaflet map, GPS polygon input, spot overlay on map, entry/exit click, import plan JSON
+- **Export Tab**: Download plan JSON (includes entry/exit, GPS polygon if available)
 
 ## User preferences
 
@@ -60,6 +61,8 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
 - Leaflet CSS imported dynamically to avoid SSR issues
 - framer-motion and recharts must be in optimizeDeps.include (dedupe React context)
 - Hex packing symmetry: scan 0–60° only (not 0–360°)
+- Gap-fill spots use zoneId=1 and laneId=-1 for visual distinction
+- Entry/exit in Map/GPS: GPS click → local coords → projectToNearestEdge → back to GPS for Leaflet marker
 
 ## Pointers
 
@@ -67,6 +70,11 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
 
 ## Best Version
 
-- Commit: `85e01517e4a17508378d8dd0fb190eba3c258e1b`
-- Label: **BEST VERSION** — fully working planner with precise drawing (identity transform fix), rotation sweep animation with live spots, custom truck form, simulation using drawn polygon, Map/GPS with world auto-zoom, iteration thumbnails with visible spots, winner metrics, and export JSON.
+- Commit: `b552ca89da260c5f2de3958bce70729272f82f1c`
+- Label: **BEST VERSION** — full feature set: entry/exit boundary snapping, farthest-first simulation dispatch, analytics fill time estimator, Map/GPS with working generate + live sweep canvas, Analytics 2-mode, Export stripped to essentials. All header clutter removed.
 - To restore: roll back to this checkpoint via Replit history.
+
+## Previous Best Versions
+
+- Commit: `85e01517e4a17508378d8dd0fb190eba3c258e1b`
+- Label: Working planner with identity transform fix, rotation sweep, custom truck form, simulation, Map/GPS world zoom, iteration thumbnails, export JSON.

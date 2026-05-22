@@ -26,10 +26,8 @@ export default function ExportTab() {
             rotationScores: planToExport.rotationScores,
             metrics:        planToExport.metrics,
             truckProfile:   truck as any,
-            entryPoint:     planToExport.entryPoint,
-            exitPoint:      planToExport.exitPoint,
             generatedAt:    new Date().toISOString(),
-          }
+          } as any
         }
       });
       const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: "application/json" });

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  runLocalEngine, runAtAngle, projectToNearestEdge, DEFAULT_TRUCKS,
+  runLocalEngine, runAtAngle, projectToNearestEdge, fillGaps, DEFAULT_TRUCKS,
   type Pt, type TruckConfig, type LocalPackResult, type RotScore, type SpotLocal,
 } from "@/engine/localEngine";
 import { useGetPresets } from "@workspace/api-client-react";
@@ -30,7 +30,7 @@ export default function PlannerTab() {
     customTrucks, addCustomTruck, removeCustomTruck,
   } = usePlanContext();
 
-  const { data: presets } = useGetPresets(undefined, { query: { queryKey: ["getPresets"] as const } });
+  const { data: presets } = useGetPresets({ query: { queryKey: ["getPresets"] as const } });
 
   const [polygon, setPolygon]           = useState<Pt[]>([]);
   const [closed, setClosed]             = useState(false);
@@ -48,6 +48,10 @@ export default function PlannerTab() {
   const [entryExitPhase, setEntryExitPhase] = useState<EntryExitPhase>("idle");
   const [localEntry, setLocalEntry]   = useState<Pt | null>(null);
   const [localExit, setLocalExit]     = useState<Pt | null>(null);
+
+  // Gap fill state
+  const [gapFilled, setGapFilled]     = useState(false);
+  const [gapFillCount, setGapFillCount] = useState(0);
 
   // Custom truck form
   const [showCustomForm, setShowCustomForm] = useState(false);
@@ -74,6 +78,7 @@ export default function PlannerTab() {
     setSweeping(true); setSweepScores([]); setBestSoFar(null);
     setEntryExitPhase("idle"); setLocalEntry(null); setLocalExit(null);
     setEntryPoint(null); setExitPoint(null);
+    setGapFilled(false); setGapFillCount(0);
 
     let idx = 0, localScores: RotScore[] = [], localBestCount = 0, localBestAngle = 0;
 
@@ -84,7 +89,6 @@ export default function PlannerTab() {
         setSweeping(false); setSweepAngle(null);
         setDisplayResult(final); setFinalResult(final); setCurrentPlan(final);
         setSelectedTruck(truck);
-        // Prompt user to mark entry/exit
         setEntryExitPhase("entry");
         return;
       }
@@ -103,14 +107,11 @@ export default function PlannerTab() {
 
   useEffect(() => () => stopSweep(), [stopSweep]);
 
-  // Sync polygon state to shared context (avoid calling context setter inside state updater)
+  // Sync polygon to context
   useEffect(() => {
-    if (polygon.length > 0) {
-      setCurrentPolygon({ pts: polygon, closed });
-    }
+    if (polygon.length > 0) setCurrentPolygon({ pts: polygon, closed });
   }, [polygon, closed, setCurrentPolygon]);
 
-  // Drawing: identity transform when not closed → clicks map 1:1 to canvas px
   const addVertex = useCallback((localX: number, localY: number) => {
     if (closed || sweeping) return;
     setPolygon((prev) => {
@@ -120,25 +121,19 @@ export default function PlannerTab() {
     });
   }, [closed, sweeping, selectedTruck]);
 
-  // Entry/exit click handler — projects click to nearest polygon edge
   const handleEntryExitClick = useCallback((localX: number, localY: number) => {
     if (polygon.length < 3) return;
     const snapped = projectToNearestEdge({ x: localX, y: localY }, polygon);
 
     if (entryExitPhase === "entry") {
-      setLocalEntry(snapped);
-      setEntryPoint(snapped);
+      setLocalEntry(snapped); setEntryPoint(snapped);
       setEntryExitPhase("exit");
     } else if (entryExitPhase === "exit") {
-      setLocalExit(snapped);
-      setExitPoint(snapped);
+      setLocalExit(snapped); setExitPoint(snapped);
       setEntryExitPhase("done");
-      // Update plan with entry/exit points
       if (finalResult) {
         const updated = { ...finalResult, entryPoint: localEntry, exitPoint: snapped };
-        setCurrentPlan(updated);
-        setDisplayResult(updated);
-        setFinalResult(updated);
+        setCurrentPlan(updated); setDisplayResult(updated); setFinalResult(updated);
       }
     }
   }, [entryExitPhase, polygon, localEntry, finalResult, setEntryPoint, setExitPoint, setCurrentPlan]);
@@ -154,9 +149,8 @@ export default function PlannerTab() {
   const closePoly = useCallback(() => {
     if (polygon.length < 3 || closed) return;
     setClosed(true);
-    setCurrentPolygon({ pts: polygon, closed: true });
     runSweep(polygon, selectedTruck, rotStep);
-  }, [polygon, closed, selectedTruck, rotStep, runSweep, setCurrentPolygon]);
+  }, [polygon, closed, selectedTruck, rotStep, runSweep]);
 
   const clearPoly = useCallback(() => {
     stopSweep();
@@ -164,7 +158,7 @@ export default function PlannerTab() {
     setDisplayResult(null); setFinalResult(null);
     setSweepScores([]); setBestSoFar(null);
     setCurrentPlan(null); setCurrentPolygon(null);
-    setTooltip(null);
+    setTooltip(null); setGapFilled(false); setGapFillCount(0);
     setEntryExitPhase("idle"); setLocalEntry(null); setLocalExit(null);
     setEntryPoint(null); setExitPoint(null);
   }, [stopSweep, setCurrentPlan, setCurrentPolygon, setEntryPoint, setExitPoint]);
@@ -172,9 +166,9 @@ export default function PlannerTab() {
   const loadPreset = useCallback((poly: Pt[]) => {
     stopSweep();
     setPolygon(poly); setClosed(true); setFinalResult(null); setTooltip(null);
-    setCurrentPolygon({ pts: poly, closed: true });
+    setGapFilled(false); setGapFillCount(0);
     runSweep(poly, selectedTruck, rotStep);
-  }, [selectedTruck, rotStep, stopSweep, runSweep, setCurrentPolygon]);
+  }, [selectedTruck, rotStep, stopSweep, runSweep]);
 
   const applyTruck = useCallback((id: string) => {
     setSelectedTruckId(id);
@@ -182,6 +176,44 @@ export default function PlannerTab() {
     setSelectedTruck(truck);
     if (polygon.length >= 3) runSweep(polygon, truck, rotStep);
   }, [polygon, rotStep, allTrucks, runSweep, setSelectedTruck]);
+
+  const handleFillGaps = useCallback(() => {
+    if (!finalResult || gapFilled) return;
+    const gapPts = fillGaps(finalResult.insetPolygon, finalResult.spots, selectedTruck);
+    if (gapPts.length === 0) { setGapFilled(true); setGapFillCount(0); return; }
+
+    const baseId = finalResult.spots.length;
+    const gapSpots: SpotLocal[] = gapPts.map((p, i) => ({
+      id: baseId + i, x: p.x, y: p.y,
+      laneId: -1, sequenceInLane: i, globalSequence: baseId + i,
+      zoneId: 1, rotation: finalResult.bestRotation, safe: true,
+    }));
+
+    const totalSpots = finalResult.spots.length + gapSpots.length;
+    const updated: LocalPackResult = {
+      ...finalResult,
+      spots: [...finalResult.spots, ...gapSpots],
+      metrics: {
+        ...finalResult.metrics,
+        spotCount: totalSpots,
+        improvementPercent: finalResult.metrics.squareGridCount > 0
+          ? ((totalSpots - finalResult.metrics.squareGridCount) / finalResult.metrics.squareGridCount) * 100
+          : 0,
+      },
+    };
+
+    setDisplayResult(updated); setFinalResult(updated); setCurrentPlan(updated);
+    setGapFilled(true); setGapFillCount(gapSpots.length);
+  }, [finalResult, gapFilled, selectedTruck, setCurrentPlan]);
+
+  const resetEntryExit = useCallback(() => {
+    setEntryExitPhase("entry"); setLocalEntry(null); setLocalExit(null);
+    setEntryPoint(null); setExitPoint(null);
+    if (finalResult) {
+      const reset = { ...finalResult, entryPoint: null, exitPoint: null };
+      setCurrentPlan(reset); setDisplayResult(reset); setFinalResult(reset);
+    }
+  }, [finalResult, setCurrentPlan, setEntryPoint, setExitPoint]);
 
   const handleAddCustomTruck = useCallback(() => {
     if (!customForm.name.trim()) { setCustomError("Name is required"); return; }
@@ -197,30 +229,20 @@ export default function PlannerTab() {
     if (polygon.length >= 3) runSweep(polygon, truck, rotStep);
   }, [customForm, addCustomTruck, polygon, rotStep, runSweep, setSelectedTruck]);
 
-  const resetEntryExit = useCallback(() => {
-    setEntryExitPhase("entry"); setLocalEntry(null); setLocalExit(null);
-    setEntryPoint(null); setExitPoint(null);
-    if (finalResult) {
-      const reset = { ...finalResult, entryPoint: null, exitPoint: null };
-      setCurrentPlan(reset); setDisplayResult(reset); setFinalResult(reset);
-    }
-  }, [finalResult, setCurrentPlan, setEntryPoint, setExitPoint]);
-
   const result   = displayResult;
   const scores   = sweeping ? sweepScores : (finalResult?.rotationScores ?? []);
   const maxScore = Math.max(...scores.map((s) => s.spotCount), 1);
 
-  // Status message for canvas header
   const statusMsg = sweeping
     ? `Scanning ${sweepAngle}° — ${result?.spots.length ?? 0} spots | best so far: ${bestSoFar !== null ? `${bestSoFar}°` : "—"}`
     : entryExitPhase === "entry"
-    ? "★ Optimization done! Click the ENTRY point on the polygon boundary (trucks enter here)"
+    ? "★ Optimization done! Click the ENTRY point on the polygon boundary"
     : entryExitPhase === "exit"
     ? "✓ Entry set. Now click the EXIT point on the polygon boundary"
     : entryExitPhase === "done"
-    ? `✓ Entry & Exit set. ${finalResult?.spots.length} spots optimally dispatched farthest-first.`
+    ? `✓ Entry & Exit set. ${finalResult?.metrics.spotCount} total spots.`
     : finalResult
-    ? `${finalResult.spots.length} spots · ${finalResult.lanes.length} lanes · optimal ${finalResult.bestRotation}°`
+    ? `${finalResult.metrics.spotCount} spots · ${finalResult.lanes.length} lanes · optimal ${finalResult.bestRotation}°`
     : "Draw polygon vertices on the canvas — click each corner";
 
   return (
@@ -229,7 +251,6 @@ export default function PlannerTab() {
       {/* ── Left panel ── */}
       <div className="flex flex-col gap-3 w-72 shrink-0 overflow-y-auto">
 
-        {/* Polygon editor */}
         <div className="bg-card border border-border rounded p-3">
           <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">Polygon Editor</div>
           <div className="flex gap-2 mb-2">
@@ -261,7 +282,7 @@ export default function PlannerTab() {
           </div>
         </div>
 
-        {/* Entry/Exit control */}
+        {/* Entry/Exit */}
         <AnimatePresence>
           {(entryExitPhase !== "idle" || localEntry || localExit) && (
             <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
@@ -282,7 +303,7 @@ export default function PlannerTab() {
                 </div>
               </div>
               <div className="text-[11px] text-muted-foreground mb-2 leading-snug">
-                Points snap to nearest boundary edge. Simulation will dispatch trucks farthest from entry first.
+                Snaps to nearest boundary edge. Simulation dispatches farthest spot first.
               </div>
               <button onClick={resetEntryExit}
                 className="w-full text-xs py-1.5 border border-dashed border-border rounded hover:border-primary hover:text-primary text-muted-foreground transition-colors">
@@ -323,7 +344,6 @@ export default function PlannerTab() {
           </button>
         </div>
 
-        {/* Custom truck form */}
         <AnimatePresence>
           {showCustomForm && (
             <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
@@ -343,8 +363,7 @@ export default function PlannerTab() {
                     <label className="text-muted-foreground block mb-0.5">{label}</label>
                     <input type={type} value={(customForm as any)[field]}
                       onChange={(e) => setCustomForm((prev) => ({
-                        ...prev,
-                        [field]: type === "number" ? Number(e.target.value) : e.target.value,
+                        ...prev, [field]: type === "number" ? Number(e.target.value) : e.target.value,
                       }))}
                       className="w-full bg-secondary border border-border rounded px-2 py-1 font-mono text-foreground focus:border-primary outline-none"
                       placeholder={type === "number" ? "0" : "My Truck"} />
@@ -368,19 +387,30 @@ export default function PlannerTab() {
           </label>
           <input type="range" min={1} max={15} value={rotStep}
             onChange={(e) => setRotStep(Number(e.target.value))}
-            className="w-full accent-primary mb-3"
-            data-testid="slider-rotation-step" />
+            className="w-full accent-primary mb-3" data-testid="slider-rotation-step" />
           <button
-            onClick={() => {
-              if (polygon.length < 3) return;
-              if (!closed) { closePoly(); return; }
-              runSweep(polygon, selectedTruck, rotStep);
-            }}
+            onClick={() => { if (polygon.length < 3) return; if (!closed) { closePoly(); return; } runSweep(polygon, selectedTruck, rotStep); }}
             disabled={polygon.length < 3 || sweeping}
             className="w-full text-sm py-2 bg-primary text-primary-foreground rounded font-semibold disabled:opacity-40 hover:opacity-90"
             data-testid="button-generate-plan">
             {sweeping ? "Optimizing…" : closed ? "Re-run Optimization" : "Close & Optimize"}
           </button>
+
+          {/* Fill Gaps button — available after optimization */}
+          <AnimatePresence>
+            {finalResult && !sweeping && (
+              <motion.button
+                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                onClick={handleFillGaps}
+                disabled={gapFilled}
+                className="w-full text-xs py-2 mt-2 bg-secondary border border-dashed border-amber-500/40 text-amber-400 rounded font-semibold disabled:opacity-50 hover:border-amber-500 hover:bg-amber-500/10 transition-colors"
+                title="Post-processing pass: finds uncovered spots near polygon boundary that the hex grid missed">
+                {gapFilled
+                  ? gapFillCount > 0 ? `✓ Gap-fill applied (+${gapFillCount} spots)` : "✓ No gaps found"
+                  : "Fill Edge Gaps ✦"}
+              </motion.button>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Results */}
@@ -391,11 +421,16 @@ export default function PlannerTab() {
               <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">★ Optimal Result</div>
               <div className="flex flex-col gap-1 text-xs">
                 <ResultRow label="Hex Spots"   value={String(finalResult.metrics.spotCount)} accent
-                  tip="Total dump spots hex-packing fits inside the turning-radius buffer" />
+                  tip="Total dump spots after hex packing + gap fill" />
+                {gapFilled && gapFillCount > 0 && (
+                  <div className="text-[11px] font-mono text-white/60 flex justify-between">
+                    <span>Gap-fill spots</span><span className="text-white">+{gapFillCount}</span>
+                  </div>
+                )}
                 <ResultRow label="Grid Spots"  value={String(finalResult.metrics.squareGridCount)}
                   tip="How many spots a basic square grid would fit (baseline)" />
                 <ResultRow label="Improvement" value={`+${finalResult.metrics.improvementPercent.toFixed(1)}%`}
-                  tip="(Hex − Grid) / Grid × 100" positive />
+                  tip="(Total − Grid) / Grid × 100" positive />
                 <ResultRow label="Best Angle"  value={`${finalResult.bestRotation}°`}
                   tip="Rotation that gave the most spots out of the 0–60° sweep" />
                 <ResultRow label="Lanes"       value={String(finalResult.lanes.length)}
@@ -422,6 +457,7 @@ export default function PlannerTab() {
                 {entryExitPhase === "entry" ? "→ Click boundary for ENTRY (green)" : "→ Click boundary for EXIT (red)"}
               </span>
             )}
+            {gapFilled && gapFillCount > 0 && <span className="text-white/50 font-mono">⬡ = gap-fill spots (white)</span>}
             <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />Entry</span>
             <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" />Exit</span>
             <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 border-t-2 border-dashed border-amber-500" />Buffer</span>
@@ -446,26 +482,31 @@ export default function PlannerTab() {
             {tooltip && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
-                className="absolute top-4 right-4 bg-card border border-border rounded p-3 text-xs font-mono z-10 shadow-lg min-w-[180px]"
-              >
+                className="absolute top-4 right-4 bg-card border border-border rounded p-3 text-xs font-mono z-10 shadow-lg min-w-[200px]">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-primary font-bold">Spot #{tooltip.spot.id + 1}</span>
+                  <span className="text-primary font-bold">
+                    {tooltip.spot.zoneId === 1 ? "Gap-fill Spot" : `Spot #${tooltip.spot.id + 1}`}
+                  </span>
                   <button onClick={() => setTooltip(null)} className="text-muted-foreground hover:text-foreground text-sm">✕</button>
                 </div>
                 <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                  <span className="text-muted-foreground">Lane</span>       <span>{tooltip.spot.laneId}</span>
-                  <span className="text-muted-foreground">Seq/Lane</span>   <span>{tooltip.spot.sequenceInLane}</span>
-                  <span className="text-muted-foreground">Global #</span>   <span>{tooltip.spot.globalSequence + 1}</span>
-                  <span className="text-muted-foreground">Rotation</span>   <span>{tooltip.spot.rotation}°</span>
-                  <span className="text-muted-foreground">X (m)</span>      <span>{tooltip.spot.x.toFixed(1)}</span>
-                  <span className="text-muted-foreground">Y (m)</span>      <span>{tooltip.spot.y.toFixed(1)}</span>
+                  <span className="text-muted-foreground">Type</span>
+                  <span className={tooltip.spot.zoneId === 1 ? "text-white/60" : "text-primary"}>
+                    {tooltip.spot.zoneId === 1 ? "Gap fill" : "Hex grid"}
+                  </span>
+                  <span className="text-muted-foreground">Lane</span>
+                  <span>{tooltip.spot.laneId < 0 ? "—" : tooltip.spot.laneId}</span>
+                  <span className="text-muted-foreground">Seq/Lane</span> <span>{tooltip.spot.sequenceInLane}</span>
+                  <span className="text-muted-foreground">Global #</span> <span>{tooltip.spot.globalSequence + 1}</span>
+                  <span className="text-muted-foreground">Rotation</span> <span>{tooltip.spot.rotation}°</span>
+                  <span className="text-muted-foreground">X (m)</span>    <span>{tooltip.spot.x.toFixed(1)}</span>
+                  <span className="text-muted-foreground">Y (m)</span>    <span>{tooltip.spot.y.toFixed(1)}</span>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        {/* Rotation sweep bar chart */}
         {scores.length > 0 && (
           <div className="h-16 bg-card border border-border rounded px-3 py-2 flex items-end gap-0.5 overflow-hidden shrink-0">
             <div className="text-[10px] text-muted-foreground font-mono mr-2 shrink-0 self-center">SWEEP</div>

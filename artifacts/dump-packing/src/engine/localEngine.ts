@@ -71,7 +71,7 @@ function ensureCCW(pts: Poly): Poly {
   return s < 0 ? [...pts].reverse() : pts;
 }
 
-function centroid(pts: Poly): Pt {
+export function centroid(pts: Poly): Pt {
   let cx = 0, cy = 0;
   for (const p of pts) { cx += p.x; cy += p.y; }
   return { x: cx / pts.length, y: cy / pts.length };
@@ -83,7 +83,7 @@ function rotatePt(p: Pt, rad: number, o: Pt): Pt {
   return { x: o.x + dx * cos - dy * sin, y: o.y + dx * sin + dy * cos };
 }
 
-function pip(p: Pt, poly: Poly): boolean {
+export function pip(p: Pt, poly: Poly): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
@@ -126,7 +126,7 @@ export function insetPoly(pts: Poly, dist: number): Poly {
   return polyArea(res) < 1 ? [] : res;
 }
 
-function bbox(pts: Poly) {
+export function bbox(pts: Poly) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of pts) {
     if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
@@ -216,13 +216,45 @@ export function projectToNearestEdge(pt: Pt, polygon: Poly): Pt {
 
 /**
  * Sort spots for optimal dispatch: farthest from entry first.
- * This ensures trucks go deep into the dump zone first so returning
- * trucks don't block trucks heading to farther spots.
+ * Trucks head deep into the dump zone first so returning trucks
+ * don't block trucks heading to farther spots.
  */
 export function sortSpotsByDispatch(spots: SpotLocal[], entryPt: Pt): SpotLocal[] {
   return [...spots]
     .sort((a, b) => Math.hypot(b.x - entryPt.x, b.y - entryPt.y) - Math.hypot(a.x - entryPt.x, a.y - entryPt.y))
     .map((s, i) => ({ ...s, globalSequence: i }));
+}
+
+/**
+ * Gap-fill pass: find positions inside the inset polygon that the hex grid missed.
+ * Useful for filling acute-corner and boundary voids in irregular polygons.
+ * Uses a fine scan (step = 0.46 × spacingX) with 88% spacing clearance.
+ * Returns new Pt[] — caller creates SpotLocal objects from these.
+ */
+export function fillGaps(inset: Poly, existingSpots: SpotLocal[], truck: TruckConfig): Pt[] {
+  if (inset.length < 3 || existingSpots.length === 0) return [];
+  const bb = bbox(inset);
+  const step = truck.spacingX * 0.46;
+  const minDist = truck.spacingX * 0.88;
+
+  const filled: Pt[] = [];
+  for (let y = bb.minY; y <= bb.maxY; y += step) {
+    for (let x = bb.minX; x <= bb.maxX; x += step) {
+      if (!pip({ x, y }, inset)) continue;
+
+      let tooClose = false;
+      for (const s of existingSpots) {
+        if (Math.hypot(s.x - x, s.y - y) < minDist) { tooClose = true; break; }
+      }
+      if (tooClose) continue;
+
+      for (const f of filled) {
+        if (Math.hypot(f.x - x, f.y - y) < minDist) { tooClose = true; break; }
+      }
+      if (!tooClose) filled.push({ x, y });
+    }
+  }
+  return filled;
 }
 
 /** Run packing at a single fixed angle — for animation sweep */
