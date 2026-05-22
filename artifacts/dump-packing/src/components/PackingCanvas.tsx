@@ -11,7 +11,9 @@ interface Props {
   insetPolygon: Pt[];
   spots: SpotLocal[];
   lanes: LaneLocal[];
-  isClosed?: boolean;           // if false → use identity transform (stable drawing coords)
+  isClosed?: boolean;
+  entryPoint?: Pt | null;
+  exitPoint?: Pt | null;
   completedSpotIds?: Set<number>;
   activeSpotId?: number | null;
   onCanvasClick?: (localX: number, localY: number) => void;
@@ -21,12 +23,6 @@ interface Props {
   sweepAngle?: number | null;
 }
 
-/**
- * Compute a stable viewport transform from polygon vertices.
- * KEY RULE: only called when polygon is closed (≥3 pts).
- * During drawing we always use identity so the coordinate system
- * never shifts between consecutive clicks.
- */
 function computeTransform(polyPts: Pt[], width: number, height: number, pad = 56) {
   if (polyPts.length < 3) return { scale: 1, offsetX: 0, offsetY: 0 };
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -40,17 +36,38 @@ function computeTransform(polyPts: Pt[], width: number, height: number, pad = 56
   return { scale, offsetX: width / 2 - cx * scale, offsetY: height / 2 - cy * scale };
 }
 
+function drawMarker(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number,
+  label: string,
+  fill: string,
+  border: string,
+) {
+  const r = 11;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = fill; ctx.fill();
+  ctx.strokeStyle = border; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 9px Inter, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(label, x, y);
+  // outer pulse ring
+  ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2);
+  ctx.strokeStyle = fill + "55"; ctx.lineWidth = 2; ctx.stroke();
+}
+
 export default function PackingCanvas({
   polygon, insetPolygon, spots, lanes,
   isClosed = false,
+  entryPoint = null, exitPoint = null,
   completedSpotIds, activeSpotId,
   onCanvasClick, onSpotClick,
   readOnly = false,
   simulationMode = false,
   sweepAngle = null,
 }: Props) {
-  const canvasRef   = useRef<HTMLCanvasElement>(null);
-  const hoveredRef  = useRef<number | null>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const hoveredRef   = useRef<number | null>(null);
   const transformRef = useRef({ scale: 1, offsetX: 0, offsetY: 0 });
 
   const draw = useCallback(() => {
@@ -61,7 +78,7 @@ export default function PackingCanvas({
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    // ── dot grid background ──
+    // dot grid
     ctx.fillStyle = "rgba(255,255,255,0.025)";
     for (let x = 20; x < W; x += 32) for (let y = 20; y < H; y += 32) {
       ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI * 2); ctx.fill();
@@ -78,52 +95,47 @@ export default function PackingCanvas({
       return;
     }
 
-    // ── Choose transform ──
-    // During drawing (!isClosed): identity — every click maps 1-to-1 to canvas pixels.
-    // After closing (isClosed): fit polygon to viewport.
     const tf = isClosed ? computeTransform(polygon, W, H) : { scale: 1, offsetX: 0, offsetY: 0 };
     transformRef.current = tf;
     const { scale, offsetX, offsetY } = tf;
     const tx = (p: Pt) => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY });
 
-    // ── Outer polygon ──
+    // Outer polygon
     if (polygon.length >= 2) {
       const tPoly = polygon.map(tx);
       ctx.beginPath();
       ctx.moveTo(tPoly[0].x, tPoly[0].y);
       for (let i = 1; i < tPoly.length; i++) ctx.lineTo(tPoly[i].x, tPoly[i].y);
-      if (polygon.length >= 3) {
-        ctx.closePath();
-        ctx.fillStyle = "rgba(99,108,130,0.12)"; ctx.fill();
-      }
-      ctx.strokeStyle = "rgba(148,163,184,0.85)"; ctx.lineWidth = 2;
-      ctx.setLineDash([]); ctx.stroke();
+      if (polygon.length >= 3) { ctx.closePath(); ctx.fillStyle = "rgba(99,108,130,0.12)"; ctx.fill(); }
+      ctx.strokeStyle = "rgba(148,163,184,0.85)"; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke();
     }
 
-    // ── Vertex dots ──
+    // Vertex dots
     for (const v of polygon.map(tx)) {
       ctx.beginPath(); ctx.arc(v.x, v.y, 5, 0, Math.PI * 2);
       ctx.fillStyle = "#f59e0b"; ctx.fill();
       ctx.strokeStyle = "#0b0e15"; ctx.lineWidth = 1.5; ctx.stroke();
     }
 
-    // ── Inset polygon (turning-radius buffer) ──
+    // Inset polygon
     if (insetPolygon.length > 2) {
       const tIn = insetPolygon.map(tx);
-      ctx.beginPath();
-      ctx.moveTo(tIn[0].x, tIn[0].y);
+      ctx.beginPath(); ctx.moveTo(tIn[0].x, tIn[0].y);
       for (let i = 1; i < tIn.length; i++) ctx.lineTo(tIn[i].x, tIn[i].y);
       ctx.closePath();
       ctx.strokeStyle = "rgba(245,158,11,0.6)"; ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]); ctx.stroke();
-      ctx.setLineDash([]);
-      // shade the inset area lightly
+      ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = "rgba(245,158,11,0.05)"; ctx.fill();
     }
 
-    if (spots.length === 0) return;
+    if (spots.length === 0) {
+      // Entry/exit markers even if no spots yet
+      if (entryPoint) { const ep = tx(entryPoint); drawMarker(ctx, ep.x, ep.y, "IN", "#10b981", "#059669"); }
+      if (exitPoint)  { const xp = tx(exitPoint);  drawMarker(ctx, xp.x, xp.y, "OUT", "#ef4444", "#dc2626"); }
+      return;
+    }
 
-    // ── Spots ──
+    // Spots
     const laneColorMap = new Map<number, string>();
     for (const l of lanes) laneColorMap.set(l.id, LANE_COLORS[l.id % LANE_COLORS.length]);
     const spotR = Math.max(4, Math.min(12, scale * 5));
@@ -141,8 +153,7 @@ export default function PackingCanvas({
         else               { fill = "rgba(239,68,68,0.80)";  stroke = "#ef4444"; }
       } else {
         const lc = laneColorMap.get(s.laneId) ?? "#f59e0b";
-        fill   = lc + "cc";
-        stroke = lc;
+        fill   = lc + "cc"; stroke = lc;
         if (sweepAngle !== null) { fill = "rgba(245,158,11,0.65)"; stroke = "#f59e0b"; }
       }
 
@@ -151,7 +162,6 @@ export default function PackingCanvas({
       ctx.fillStyle = fill; ctx.fill();
       ctx.strokeStyle = stroke; ctx.lineWidth = isHov ? 2.5 : 1.5; ctx.stroke();
 
-      // sequence label when zoomed in
       if (scale > 5 && !simulationMode) {
         ctx.fillStyle = "rgba(255,255,255,0.7)";
         ctx.font = `${Math.max(6, spotR * 0.85)}px JetBrains Mono, monospace`;
@@ -160,7 +170,7 @@ export default function PackingCanvas({
       }
     }
 
-    // ── Lane labels ──
+    // Lane labels
     if (!simulationMode && sweepAngle === null && lanes.length > 0 && scale > 1.5) {
       for (const lane of lanes) {
         const ls = spots.filter((s) => s.laneId === lane.id);
@@ -175,32 +185,30 @@ export default function PackingCanvas({
       }
     }
 
-    // ── Sweep overlay (dim canvas + show angle label on top) ──
+    // Sweep overlay
     if (sweepAngle !== null) {
       ctx.save();
-      ctx.fillStyle = "rgba(245,158,11,0.08)";
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "rgba(245,158,11,0.08)"; ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = "rgba(245,158,11,0.9)";
       ctx.font = "bold 18px JetBrains Mono, monospace";
       ctx.textAlign = "center"; ctx.textBaseline = "top";
       ctx.fillText(`Testing ${sweepAngle}°  ·  ${spots.length} spots`, W / 2, 10);
       ctx.restore();
     }
-  }, [polygon, insetPolygon, spots, lanes, isClosed, completedSpotIds, activeSpotId, simulationMode, sweepAngle]);
 
-  // Resize observer
+    // Entry / Exit markers (drawn last so they're on top)
+    if (entryPoint) { const ep = tx(entryPoint); drawMarker(ctx, ep.x, ep.y, "IN", "#10b981", "#059669"); }
+    if (exitPoint)  { const xp = tx(exitPoint);  drawMarker(ctx, xp.x, xp.y, "OUT", "#ef4444", "#dc2626"); }
+  }, [polygon, insetPolygon, spots, lanes, isClosed, entryPoint, exitPoint, completedSpotIds, activeSpotId, simulationMode, sweepAngle]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ro = new ResizeObserver(() => {
-      canvas.width  = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
-      draw();
+      canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; draw();
     });
     ro.observe(canvas);
-    canvas.width  = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
-    draw();
+    canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; draw();
     return () => ro.disconnect();
   }, [draw]);
 
@@ -221,7 +229,6 @@ export default function PackingCanvas({
     e.preventDefault();
     const { cx, cy } = getXY(e);
 
-    // Hit-test spots first
     if (spots.length > 0 && isClosed) {
       const { scale, offsetX, offsetY } = transformRef.current;
       const sr = Math.max(4, Math.min(12, scale * 5)) + 6;
@@ -231,7 +238,8 @@ export default function PackingCanvas({
       }
     }
 
-    onCanvasClick?.(screenToLocal(cx, cy).x, screenToLocal(cx, cy).y);
+    const local = screenToLocal(cx, cy);
+    onCanvasClick?.(local.x, local.y);
   }, [readOnly, spots, isClosed, getXY, screenToLocal, onCanvasClick, onSpotClick]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -258,7 +266,6 @@ export default function PackingCanvas({
       onClick={handleClick}
       onMouseMove={handleMouseMove}
       onContextMenu={(e) => e.preventDefault()}
-      data-testid="packing-canvas"
     />
   );
 }

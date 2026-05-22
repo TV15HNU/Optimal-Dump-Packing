@@ -15,11 +15,11 @@ const queryClient = new QueryClient({
 });
 
 const TABS = [
-  { id: "planner", label: "Planner" },
+  { id: "planner",    label: "Planner" },
   { id: "simulation", label: "Simulation" },
-  { id: "analytics", label: "Analytics" },
-  { id: "map", label: "Map / GPS" },
-  { id: "export", label: "Export & Info" },
+  { id: "analytics",  label: "Analytics" },
+  { id: "map",        label: "Map / GPS" },
+  { id: "export",     label: "Export" },
 ] as const;
 
 type TabId = typeof TABS[number]["id"];
@@ -29,7 +29,6 @@ function Dashboard() {
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-      {/* Header */}
       <header className="flex items-center justify-between px-5 py-3 border-b border-border bg-card shrink-0">
         <div className="flex flex-col">
           <span className="text-sm font-bold text-foreground tracking-tight leading-none">
@@ -39,56 +38,39 @@ function Dashboard() {
             Adaptive Polygon Spot-Point Packing
           </span>
         </div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground font-mono">
-          <span className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
-            Engine Online
-          </span>
-          <span className="text-muted-foreground/40">|</span>
-          <span>Phase 1 MVP</span>
-          <span className="text-muted-foreground/40">|</span>
-          <span>Hex Packing 90.7%</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+          <span>Engine Online</span>
         </div>
       </header>
 
-      {/* Tab Bar */}
       <nav className="flex items-center gap-0.5 px-4 pt-2 border-b border-border bg-card shrink-0">
         {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
             data-testid={`tab-${tab.id}`}
             className={`relative px-4 py-2 text-xs font-medium transition-colors rounded-t outline-none ${
               activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
+            }`}>
             {tab.label}
             {activeTab === tab.id && (
-              <motion.div
-                layoutId="active-tab-indicator"
-                className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"
-              />
+              <motion.div layoutId="active-tab-indicator"
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
             )}
           </button>
         ))}
       </nav>
 
-      {/* Tab Content */}
       <main className="flex-1 overflow-hidden">
         <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="h-full"
-          >
-            {activeTab === "planner" && <PlannerTab />}
+          <motion.div key={activeTab}
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }}
+            className="h-full">
+            {activeTab === "planner"    && <PlannerTab />}
             {activeTab === "simulation" && <SimulationTab />}
-            {activeTab === "analytics" && <AnalyticsTab />}
-            {activeTab === "map" && <MapTab />}
-            {activeTab === "export" && <ExportTab />}
+            {activeTab === "analytics"  && <AnalyticsTab />}
+            {activeTab === "map"        && <MapTab />}
+            {activeTab === "export"     && <ExportTab />}
           </motion.div>
         </AnimatePresence>
       </main>

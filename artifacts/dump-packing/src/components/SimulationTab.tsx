@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { runLocalEngine, DEFAULT_TRUCKS, type LocalPackResult, type Pt, type TruckConfig } from "@/engine/localEngine";
+import {
+  runLocalEngine, sortSpotsByDispatch, DEFAULT_TRUCKS,
+  type LocalPackResult, type Pt, type TruckConfig, type SpotLocal,
+} from "@/engine/localEngine";
 import PackingCanvas from "./PackingCanvas";
 import { usePlanContext } from "@/lib/planContext";
 
@@ -19,20 +22,27 @@ const BLANK_CUSTOM: Omit<TruckConfig, "id"> = {
   name: "", width: 9, length: 14, turningRadius: 12, spacingX: 13.5, spacingY: 13.5, payloadTonnes: 200,
 };
 
-export default function SimulationTab() {
-  const { currentPlan, currentPolygon, customTrucks, addCustomTruck, removeCustomTruck } = usePlanContext();
+/** Build dispatch order: farthest from entry first */
+function buildDispatchOrder(plan: LocalPackResult, entryPt: Pt | null): SpotLocal[] {
+  if (!entryPt) return [...plan.spots].sort((a, b) => a.globalSequence - b.globalSequence);
+  return sortSpotsByDispatch(plan.spots, entryPt);
+}
 
-  const [useDrawnPlan, setUseDrawnPlan] = useState(false);
-  const [plan, setPlan]       = useState<LocalPackResult>(() => runLocalEngine(DEFAULT_POLY, DEFAULT_TRUCKS[0], 5));
-  const [completedIds, setCompletedIds] = useState<Set<number>>(new Set());
-  const [activeId, setActiveId]         = useState<number | null>(null);
-  const [playing, setPlaying]           = useState(false);
-  const [speed, setSpeed]               = useState(1);
-  const [currentStep, setCurrentStep]   = useState(0);
+export default function SimulationTab() {
+  const { currentPlan, entryPoint, exitPoint, customTrucks, addCustomTruck, removeCustomTruck } = usePlanContext();
+
+  const [useDrawnPlan, setUseDrawnPlan]     = useState(false);
+  const [plan, setPlan]                     = useState<LocalPackResult>(() => runLocalEngine(DEFAULT_POLY, DEFAULT_TRUCKS[0], 5));
+  const [dispatchOrder, setDispatchOrder]   = useState<SpotLocal[]>(() => buildDispatchOrder(plan, null));
+  const [completedIds, setCompletedIds]     = useState<Set<number>>(new Set());
+  const [activeId, setActiveId]             = useState<number | null>(null);
+  const [playing, setPlaying]               = useState(false);
+  const [speed, setSpeed]                   = useState(1);
+  const [currentStep, setCurrentStep]       = useState(0);
   const [selectedPreset, setSelectedPreset] = useState(0);
   const [selectedTruckId, setSelectedTruckId] = useState(DEFAULT_TRUCKS[0].id);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeTimeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Custom truck form
   const [showCustomForm, setShowCustomForm] = useState(false);
@@ -40,8 +50,15 @@ export default function SimulationTab() {
   const [customError, setCustomError]       = useState("");
 
   const allTrucks: TruckConfig[] = [...DEFAULT_TRUCKS, ...customTrucks];
+  const activeTruck = allTrucks.find((t) => t.id === selectedTruckId) ?? DEFAULT_TRUCKS[0];
 
-  // When a plan exists from Planner and user switches to it
+  // Recompute dispatch order when plan or entry point changes
+  useEffect(() => {
+    const ep = useDrawnPlan ? entryPoint : null;
+    setDispatchOrder(buildDispatchOrder(plan, ep));
+  }, [plan, entryPoint, useDrawnPlan]);
+
+  // Sync plan when switching to drawn plan
   useEffect(() => {
     if (useDrawnPlan && currentPlan) {
       setPlan(currentPlan);
@@ -49,13 +66,12 @@ export default function SimulationTab() {
     }
   }, [useDrawnPlan, currentPlan]);
 
-  const sortedSpots  = [...plan.spots].sort((a, b) => a.globalSequence - b.globalSequence);
-  const totalSpots   = sortedSpots.length;
-  const progressPct  = totalSpots > 0 ? Math.round((completedIds.size / totalSpots) * 100) : 0;
+  const totalSpots  = dispatchOrder.length;
+  const progressPct = totalSpots > 0 ? Math.round((completedIds.size / totalSpots) * 100) : 0;
 
   const stop = useCallback(() => {
-    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-    if (activeTimeoutRef.current) { clearTimeout(activeTimeoutRef.current); activeTimeoutRef.current = null; }
+    if (intervalRef.current)   { clearInterval(intervalRef.current);  intervalRef.current = null; }
+    if (activeTimeRef.current) { clearTimeout(activeTimeRef.current); activeTimeRef.current = null; }
     setPlaying(false); setActiveId(null);
   }, []);
 
@@ -67,40 +83,44 @@ export default function SimulationTab() {
     if (currentStep >= totalSpots) { reset(); return; }
     setPlaying(true);
     let step = currentStep;
+    const cycleDuration = Math.max(120, 700 / speed);
+    const activeDuration = Math.max(80, 500 / speed);
+
     intervalRef.current = setInterval(() => {
       if (step >= totalSpots) { stop(); return; }
-      const spot = sortedSpots[step];
+      const spot = dispatchOrder[step];
       setActiveId(spot.id);
-      activeTimeoutRef.current = setTimeout(() => {
+      activeTimeRef.current = setTimeout(() => {
         setCompletedIds((prev) => new Set([...prev, spot.id]));
         setActiveId(null);
-      }, Math.max(80, 500 / speed));
+      }, activeDuration);
       step++; setCurrentStep(step);
-    }, Math.max(120, 700 / speed));
-  }, [currentStep, totalSpots, sortedSpots, speed, stop, reset]);
+    }, cycleDuration);
+  }, [currentStep, totalSpots, dispatchOrder, speed, stop, reset]);
 
   useEffect(() => () => stop(), [stop]);
 
   const loadPreset = useCallback((idx: number) => {
     stop(); setSelectedPreset(idx); setUseDrawnPlan(false);
-    const truck = allTrucks.find((t) => t.id === selectedTruckId) ?? DEFAULT_TRUCKS[0];
-    setPlan(runLocalEngine(PRESET_POLYS[idx].poly, truck, 5));
+    const newPlan = runLocalEngine(PRESET_POLYS[idx].poly, activeTruck, 5);
+    setPlan(newPlan);
     setCompletedIds(new Set()); setActiveId(null); setCurrentStep(0);
-  }, [selectedTruckId, allTrucks, stop]);
+  }, [activeTruck, stop]);
 
   const loadTruck = useCallback((id: string) => {
     stop(); setSelectedTruckId(id);
     const truck = allTrucks.find((t) => t.id === id) ?? DEFAULT_TRUCKS[0];
-    if (useDrawnPlan && currentPlan) { setPlan(runLocalEngine(currentPlan.polygon, truck, 5)); }
-    else { setPlan(runLocalEngine(PRESET_POLYS[selectedPreset].poly, truck, 5)); }
+    const poly  = useDrawnPlan && currentPlan ? currentPlan.polygon : PRESET_POLYS[selectedPreset].poly;
+    setPlan(runLocalEngine(poly, truck, 5));
     setCompletedIds(new Set()); setActiveId(null); setCurrentStep(0);
   }, [selectedPreset, useDrawnPlan, currentPlan, allTrucks, stop]);
 
   const handleUseDrawnPlan = useCallback(() => {
     if (!currentPlan) return;
+    stop();
     setUseDrawnPlan(true);
     setPlan(currentPlan);
-    setCompletedIds(new Set()); setActiveId(null); setCurrentStep(0); stop();
+    setCompletedIds(new Set()); setActiveId(null); setCurrentStep(0);
   }, [currentPlan, stop]);
 
   const handleAddCustomTruck = useCallback(() => {
@@ -116,9 +136,17 @@ export default function SimulationTab() {
 
   const allDone     = completedIds.size === totalSpots && totalSpots > 0;
   const noneStarted = completedIds.size === 0 && activeId === null;
+
   const laneProgress = plan.lanes.map((l) => ({
     id: l.id, total: l.spotIds.length, done: l.spotIds.filter((id) => completedIds.has(id)).length,
   }));
+
+  // Effective entry/exit for canvas
+  const effectiveEntry = useDrawnPlan ? entryPoint : null;
+  const effectiveExit  = useDrawnPlan ? exitPoint  : null;
+
+  // Show dispatch order indicator: which spot is next
+  const nextSpot = currentStep < totalSpots ? dispatchOrder[currentStep] : null;
 
   return (
     <div className="flex h-full gap-4 p-4 overflow-hidden">
@@ -150,8 +178,12 @@ export default function SimulationTab() {
               }`}>{p.name}</button>
           ))}
           {useDrawnPlan && currentPlan && (
-            <div className="text-xs font-mono text-green-400 mt-1">
-              Using Planner result — {currentPlan.spots.length} spots, {currentPlan.bestRotation}°
+            <div className="text-xs mt-1 space-y-0.5">
+              <div className="font-mono text-green-400">{currentPlan.spots.length} spots · {currentPlan.bestRotation}°</div>
+              {effectiveEntry
+                ? <div className="text-green-400 font-mono text-[10px]">Entry set ✓ — farthest-first dispatch active</div>
+                : <div className="text-muted-foreground text-[10px] italic">No entry point — set in Planner for optimal order</div>
+              }
             </div>
           )}
         </div>
@@ -187,8 +219,8 @@ export default function SimulationTab() {
               <div className="flex flex-col gap-1.5 text-xs">
                 {([
                   ["name", "Truck Name", "text"],
-                  ["width", "Body Width (m)", "number"],
-                  ["length", "Body Length (m)", "number"],
+                  ["width", "Width (m)", "number"],
+                  ["length", "Length (m)", "number"],
                   ["turningRadius", "Turning Radius (m)", "number"],
                   ["spacingX", "Spacing X (m)", "number"],
                   ["spacingY", "Spacing Y (m)", "number"],
@@ -198,7 +230,7 @@ export default function SimulationTab() {
                     <label className="text-muted-foreground block mb-0.5">{label}</label>
                     <input type={type} value={(customForm as any)[field]}
                       onChange={(e) => setCustomForm((p) => ({ ...p, [field]: type === "number" ? Number(e.target.value) : e.target.value }))}
-                      className="w-full bg-secondary border border-border rounded px-2 py-1 font-mono text-foreground focus:border-primary outline-none" />
+                      className="w-full bg-secondary border border-border rounded px-2 py-1 font-mono focus:border-primary outline-none" />
                   </div>
                 ))}
                 {customError && <div className="text-red-400 text-[11px]">{customError}</div>}
@@ -223,7 +255,6 @@ export default function SimulationTab() {
                 </button>}
             <button onClick={reset} className="py-1.5 px-3 text-xs bg-secondary border border-border rounded">Reset</button>
           </div>
-
           <div className="text-xs text-muted-foreground mb-1">Speed</div>
           <div className="flex gap-1 mb-3">
             {[1, 2, 4].map((s) => (
@@ -242,6 +273,17 @@ export default function SimulationTab() {
             <span>{completedIds.size}/{totalSpots} dumped</span>
             <span>{progressPct}%</span>
           </div>
+
+          {nextSpot && !allDone && (
+            <div className="mt-2 text-[10px] font-mono text-muted-foreground">
+              Next: Spot #{nextSpot.globalSequence + 1}
+              {effectiveEntry && (
+                <span className="ml-1 text-amber-400">
+                  (dist {Math.hypot(nextSpot.x - effectiveEntry.x, nextSpot.y - effectiveEntry.y).toFixed(0)}m from entry)
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Lane progress */}
@@ -266,14 +308,15 @@ export default function SimulationTab() {
       <div className="flex-1 flex flex-col gap-2 min-w-0">
         <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
           <span>
-            {plan.spots.length} spots · {plan.lanes.length} lanes ·{" "}
-            {allTrucks.find((t) => t.id === selectedTruckId)?.name ?? ""}
+            {plan.spots.length} spots · {plan.lanes.length} lanes · {activeTruck.name}
             {useDrawnPlan ? " · From Planner" : ""}
+            {effectiveEntry ? " · Farthest-first dispatch ✓" : ""}
           </span>
           <div className="flex gap-3 items-center">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />Entry (IN)</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block" />Exit (OUT)</span>
             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />Pending</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-white inline-block" />Active</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />Dumped</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block opacity-60" />Dumped</span>
           </div>
         </div>
 
@@ -284,6 +327,8 @@ export default function SimulationTab() {
             spots={plan.spots}
             lanes={plan.lanes}
             isClosed
+            entryPoint={effectiveEntry}
+            exitPoint={effectiveExit}
             completedSpotIds={completedIds}
             activeSpotId={activeId}
             simulationMode
@@ -297,6 +342,12 @@ export default function SimulationTab() {
           <span>Optimal angle: <span className="text-primary">{plan.bestRotation}°</span></span>
           <span>|</span>
           <span>Improvement: <span className="text-green-400">+{plan.metrics.improvementPercent.toFixed(1)}%</span></span>
+          <span>|</span>
+          <span>
+            Dispatch: <span className={effectiveEntry ? "text-amber-400" : "text-muted-foreground"}>
+              {effectiveEntry ? "Farthest-first (optimal)" : "Sequential"}
+            </span>
+          </span>
           <span>|</span>
           <span>Status: <span className={allDone ? "text-green-400" : playing ? "text-amber-400" : noneStarted ? "text-red-400" : "text-foreground"}>
             {allDone ? "Complete" : playing ? "Dispatching…" : noneStarted ? "Ready" : "Paused"}

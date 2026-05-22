@@ -39,6 +39,8 @@ export interface LocalPackResult {
   insetPolygon: Pt[];
   bestRotation: number;
   rotationScores: RotScore[];
+  entryPoint: Pt | null;
+  exitPoint: Pt | null;
   metrics: {
     spotCount: number;
     squareGridCount: number;
@@ -196,6 +198,33 @@ function buildSpotsFromPoints(pts: Pt[], inset: Poly, angleDeg: number, spacingX
   return { spots, lanes };
 }
 
+/** Project a point onto the nearest polygon edge (boundary snap for entry/exit) */
+export function projectToNearestEdge(pt: Pt, polygon: Poly): Pt {
+  let bestDist = Infinity, bestPt: Pt = polygon[0];
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) continue;
+    const t = Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / len2));
+    const proj = { x: a.x + t * dx, y: a.y + t * dy };
+    const d = Math.hypot(pt.x - proj.x, pt.y - proj.y);
+    if (d < bestDist) { bestDist = d; bestPt = proj; }
+  }
+  return bestPt;
+}
+
+/**
+ * Sort spots for optimal dispatch: farthest from entry first.
+ * This ensures trucks go deep into the dump zone first so returning
+ * trucks don't block trucks heading to farther spots.
+ */
+export function sortSpotsByDispatch(spots: SpotLocal[], entryPt: Pt): SpotLocal[] {
+  return [...spots]
+    .sort((a, b) => Math.hypot(b.x - entryPt.x, b.y - entryPt.y) - Math.hypot(a.x - entryPt.x, a.y - entryPt.y))
+    .map((s, i) => ({ ...s, globalSequence: i }));
+}
+
 /** Run packing at a single fixed angle — for animation sweep */
 export function runAtAngle(polygon: Poly, truck: TruckConfig, angleDeg: number): LocalPackResult {
   const inset = insetPoly(polygon, truck.turningRadius);
@@ -210,6 +239,7 @@ export function runAtAngle(polygon: Poly, truck: TruckConfig, angleDeg: number):
   return {
     spots, lanes, polygon, insetPolygon: inset,
     bestRotation: angleDeg, rotationScores: [{ angle: angleDeg, spotCount: pts.length }],
+    entryPoint: null, exitPoint: null,
     metrics: { spotCount: pts.length, squareGridCount: squareCount, improvementPercent: improvement, utilizationEfficiency: util, hexPackEfficiency: 0.9069, squarePackEfficiency: 0.7854, insetArea, totalArea },
   };
 }
@@ -218,7 +248,7 @@ export function runLocalEngine(polygon: Poly, truck: TruckConfig, rotStep = 5): 
   if (polygon.length < 3) {
     return {
       spots: [], lanes: [], polygon, insetPolygon: [],
-      bestRotation: 0, rotationScores: [],
+      bestRotation: 0, rotationScores: [], entryPoint: null, exitPoint: null,
       metrics: { spotCount: 0, squareGridCount: 0, improvementPercent: 0, utilizationEfficiency: 0, hexPackEfficiency: 0.9069, squarePackEfficiency: 0.7854, insetArea: 0, totalArea: 0 }
     };
   }
@@ -230,6 +260,7 @@ export function runLocalEngine(polygon: Poly, truck: TruckConfig, rotStep = 5): 
   const scores: RotScore[] = [];
   let bestAngle = 0, bestCount = 0, bestPts: Pt[] = [];
 
+  // 0–60° is mathematically complete for hex packing (60° rotational symmetry)
   for (let a = 0; a < 60; a += rotStep) {
     const pts = hexGridAtAngle(inset, truck.spacingX, truck.spacingY, a);
     scores.push({ angle: a, spotCount: pts.length });
@@ -245,13 +276,22 @@ export function runLocalEngine(polygon: Poly, truck: TruckConfig, rotStep = 5): 
   return {
     spots, lanes, polygon, insetPolygon: inset,
     bestRotation: bestAngle, rotationScores: scores,
+    entryPoint: null, exitPoint: null,
     metrics: { spotCount: bestCount, squareGridCount: squareCount, improvementPercent: improvement, utilizationEfficiency: util, hexPackEfficiency: 0.9069, squarePackEfficiency: 0.7854, insetArea, totalArea },
   };
 }
 
+// Truck cycle time for dump operation (minutes per spot, industry benchmarks)
+export const TRUCK_CYCLE_TIMES: Record<string, number> = {
+  "cat-793":  4.5,
+  "cat-797f": 6.0,
+  "cat-789d": 3.8,
+};
+export const DEFAULT_CYCLE_TIME = 5.0;
+
 // Only 3 trucks (Komatsu 930E removed)
 export const DEFAULT_TRUCKS: TruckConfig[] = [
-  { id: "cat-793", name: "CAT 793", width: 9.14, length: 14.71, turningRadius: 12, spacingX: 13.5, spacingY: 13.5, payloadTonnes: 227 },
-  { id: "cat-797f", name: "CAT 797F", width: 9.75, length: 15.09, turningRadius: 14.5, spacingX: 16, spacingY: 16, payloadTonnes: 363 },
-  { id: "cat-789d", name: "CAT 789D", width: 8.43, length: 13.62, turningRadius: 11, spacingX: 12, spacingY: 12, payloadTonnes: 181 },
+  { id: "cat-793",  name: "CAT 793",  width: 9.14, length: 14.71, turningRadius: 12,   spacingX: 13.5, spacingY: 13.5, payloadTonnes: 227 },
+  { id: "cat-797f", name: "CAT 797F", width: 9.75, length: 15.09, turningRadius: 14.5, spacingX: 16,   spacingY: 16,   payloadTonnes: 363 },
+  { id: "cat-789d", name: "CAT 789D", width: 8.43, length: 13.62, turningRadius: 11,   spacingX: 12,   spacingY: 12,   payloadTonnes: 181 },
 ];
