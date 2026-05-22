@@ -64,3 +64,9 @@ _Industrial planning and simulation platform for autonomous mining haul trucks â
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+
+## Best Version
+
+- Commit: `85e01517e4a17508378d8dd0fb190eba3c258e1b`
+- Label: **BEST VERSION** â€” fully working planner with precise drawing (identity transform fix), rotation sweep animation with live spots, custom truck form, simulation using drawn polygon, Map/GPS with world auto-zoom, iteration thumbnails with visible spots, winner metrics, and export JSON.
+- To restore: roll back to this checkpoint via Replit history.
