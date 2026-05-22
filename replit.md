@@ -70,8 +70,8 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
 
 ## Best Version
 
-- Commit: `b552ca89da260c5f2de3958bce70729272f82f1c`
-- Label: **BEST VERSION** — full feature set: entry/exit boundary snapping, farthest-first simulation dispatch, analytics fill time estimator, Map/GPS with working generate + live sweep canvas, Analytics 2-mode, Export stripped to essentials. All header clutter removed.
+- Commit: `aef6f06260e217b8787522e4159d22a104c20066`
+- Label: **BEST VERSION** — full feature set with auth + DB: Clerk auth (email/password + Google), role-based login (Supervisor/Driver selector on landing), Dashboard with high-res site canvas, auto-demo spot-fill, daily report modal, custom trucks persisted to PostgreSQL with duplicate-name override modal, Map/GPS 0–59° sweep (1° step), Export/Import with post-import save-to-dashboard, entry/exit GPS coord inputs, Fill Edge Gaps in Map tab.
 - To restore: roll back to this checkpoint via Replit history.
 
 ## Previous Best Versions

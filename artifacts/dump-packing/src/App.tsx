@@ -1,5 +1,4 @@
-import { useEffect, useRef } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useUser } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
@@ -39,6 +38,7 @@ if (!clerkPubKey) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
 }
 
+// ─── Clerk dark-industrial appearance ───────────────────────────────────────
 const clerkAppearance = {
   theme: shadcn,
   cssLayerName: "clerk",
@@ -88,6 +88,246 @@ const clerkAppearance = {
   },
 };
 
+// ─── Role management ─────────────────────────────────────────────────────────
+type Role = "supervisor" | "driver";
+const ROLE_KEY = "dump_packing_role";
+
+function getStoredRole(): Role | null {
+  return (localStorage.getItem(ROLE_KEY) as Role) ?? null;
+}
+function setStoredRole(role: Role) {
+  localStorage.setItem(ROLE_KEY, role);
+}
+
+// ─── Role selection screen ────────────────────────────────────────────────────
+function RoleSelectScreen({ onSelect }: { onSelect: (role: Role, path: "sign-in" | "sign-up") => void }) {
+  const [chosen, setChosen] = useState<Role | null>(null);
+
+  const roles: { id: Role; icon: string; title: string; desc: string }[] = [
+    {
+      id: "supervisor",
+      icon: "🏗",
+      title: "Supervisor",
+      desc: "Access all planning tools, Dashboard, site monitoring, daily reports, and export/import.",
+    },
+    {
+      id: "driver",
+      icon: "🚛",
+      title: "Driver",
+      desc: "View assigned dump sites, track spot-filling progress, and mark spots complete.",
+    },
+  ];
+
+  return (
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background gap-8 px-4">
+      <div className="text-center">
+        <div className="text-2xl font-bold tracking-tight mb-1">OPTIMAL DUMP PACKING</div>
+        <div className="text-xs text-muted-foreground font-mono tracking-widest uppercase">
+          Adaptive Polygon Spot-Point Packing
+        </div>
+      </div>
+
+      <div className="w-full max-w-sm">
+        <div className="text-center text-sm text-muted-foreground mb-4">Select your role to continue</div>
+        <div className="flex flex-col gap-3">
+          {roles.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => setChosen(r.id)}
+              className={`flex items-start gap-4 p-4 rounded border text-left transition-all ${
+                chosen === r.id
+                  ? "border-primary bg-primary/8 ring-1 ring-primary/30"
+                  : "border-border bg-card hover:border-primary/40 hover:bg-primary/5"
+              }`}>
+              <span className="text-2xl mt-0.5 select-none">{r.icon}</span>
+              <div>
+                <div className="font-semibold text-sm">{r.title}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{r.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <AnimatePresence>
+          {chosen && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="flex gap-3 mt-5">
+              <button
+                onClick={() => onSelect(chosen, "sign-in")}
+                className="flex-1 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded hover:opacity-90">
+                Sign In
+              </button>
+              <button
+                onClick={() => onSelect(chosen, "sign-up")}
+                className="flex-1 py-2.5 border border-border text-sm rounded hover:bg-muted">
+                Create Account
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+// ─── Driver view (simplified) ─────────────────────────────────────────────────
+const DRIVER_TABS = [
+  { id: "planner",    label: "Planner" },
+  { id: "simulation", label: "Simulation" },
+  { id: "map",        label: "Map / GPS" },
+] as const;
+type DriverTabId = typeof DRIVER_TABS[number]["id"];
+
+function DriverApp() {
+  const [activeTab, setActiveTab] = useState<DriverTabId>("planner");
+  const { signOut } = useClerk();
+  const { user } = useUser();
+
+  return (
+    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+      <header className="flex items-center justify-between px-5 py-3 border-b border-border bg-card shrink-0">
+        <div className="flex flex-col">
+          <span className="text-sm font-bold text-foreground tracking-tight leading-none">
+            OPTIMAL DUMP PACKING
+          </span>
+          <span className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase leading-tight mt-0.5">
+            Driver Interface
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+          <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded text-[10px] font-semibold uppercase">
+            Driver
+          </span>
+          {user && (
+            <>
+              <span className="text-border">|</span>
+              <span className="text-foreground">{user.primaryEmailAddress?.emailAddress ?? user.username}</span>
+              <button
+                onClick={() => { localStorage.removeItem(ROLE_KEY); signOut({ redirectUrl: basePath || "/" }); }}
+                className="text-muted-foreground hover:text-foreground transition-colors border border-border rounded px-2 py-0.5 hover:border-primary/50">
+                Sign out
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
+      <nav className="flex items-center gap-0.5 px-4 pt-2 border-b border-border bg-card shrink-0">
+        {DRIVER_TABS.map((tab) => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            className={`relative px-4 py-2 text-xs font-medium transition-colors rounded-t outline-none ${
+              activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            {tab.label}
+            {activeTab === tab.id && (
+              <motion.div layoutId="driver-tab-indicator"
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+            )}
+          </button>
+        ))}
+      </nav>
+
+      <main className="flex-1 overflow-hidden">
+        <AnimatePresence mode="wait">
+          <motion.div key={activeTab}
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }}
+            className="h-full">
+            {activeTab === "planner"    && <PlannerTab />}
+            {activeTab === "simulation" && <SimulationTab />}
+            {activeTab === "map"        && <MapTab />}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+}
+
+// ─── Supervisor tabs ──────────────────────────────────────────────────────────
+const SUPERVISOR_TABS = [
+  { id: "planner",    label: "Planner" },
+  { id: "simulation", label: "Simulation" },
+  { id: "analytics",  label: "Analytics" },
+  { id: "map",        label: "Map / GPS" },
+  { id: "export",     label: "Export/Import" },
+  { id: "dashboard",  label: "Dashboard" },
+] as const;
+type SupervisorTabId = typeof SUPERVISOR_TABS[number]["id"];
+
+function SupervisorApp() {
+  const [activeTab, setActiveTab] = useState<SupervisorTabId>("planner");
+  const { signOut } = useClerk();
+  const { user } = useUser();
+
+  return (
+    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+      <header className="flex items-center justify-between px-5 py-3 border-b border-border bg-card shrink-0">
+        <div className="flex flex-col">
+          <span className="text-sm font-bold text-foreground tracking-tight leading-none">
+            OPTIMAL DUMP PACKING
+          </span>
+          <span className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase leading-tight mt-0.5">
+            Adaptive Polygon Spot-Point Packing
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+          <span>Engine Online</span>
+          <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded text-[10px] font-semibold uppercase">
+            Supervisor
+          </span>
+          {user && (
+            <>
+              <span className="text-border">|</span>
+              <span className="text-foreground">{user.primaryEmailAddress?.emailAddress ?? user.username}</span>
+              <button
+                onClick={() => { localStorage.removeItem(ROLE_KEY); signOut({ redirectUrl: basePath || "/" }); }}
+                className="text-muted-foreground hover:text-foreground transition-colors border border-border rounded px-2 py-0.5 hover:border-primary/50">
+                Sign out
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
+      <nav className="flex items-center gap-0.5 px-4 pt-2 border-b border-border bg-card shrink-0">
+        {SUPERVISOR_TABS.map((tab) => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            data-testid={`tab-${tab.id}`}
+            className={`relative px-4 py-2 text-xs font-medium transition-colors rounded-t outline-none ${
+              activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            {tab.label}
+            {activeTab === tab.id && (
+              <motion.div layoutId="supervisor-tab-indicator"
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+            )}
+          </button>
+        ))}
+      </nav>
+
+      <main className="flex-1 overflow-hidden">
+        <AnimatePresence mode="wait">
+          <motion.div key={activeTab}
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }}
+            className="h-full">
+            {activeTab === "planner"    && <PlannerTab />}
+            {activeTab === "simulation" && <SimulationTab />}
+            {activeTab === "analytics"  && <AnalyticsTab />}
+            {activeTab === "map"        && <MapTab />}
+            {activeTab === "export"     && <ExportImportTab />}
+            {activeTab === "dashboard"  && <DashboardTab />}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+}
+
+// ─── Sign-in / Sign-up wrappers ───────────────────────────────────────────────
 function SignInPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
@@ -123,86 +363,21 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-const TABS = [
-  { id: "planner",    label: "Planner" },
-  { id: "simulation", label: "Simulation" },
-  { id: "analytics",  label: "Analytics" },
-  { id: "map",        label: "Map / GPS" },
-  { id: "export",     label: "Export/Import" },
-  { id: "dashboard",  label: "Dashboard" },
-] as const;
-
-type TabId = typeof TABS[number]["id"];
-
-function Dashboard() {
-  const [activeTab, setActiveTab] = useState<TabId>("planner");
-  const { signOut } = useClerk();
-  const { user } = useUser();
-
-  return (
-    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-      <header className="flex items-center justify-between px-5 py-3 border-b border-border bg-card shrink-0">
-        <div className="flex flex-col">
-          <span className="text-sm font-bold text-foreground tracking-tight leading-none">
-            OPTIMAL DUMP PACKING
-          </span>
-          <span className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase leading-tight mt-0.5">
-            Adaptive Polygon Spot-Point Packing
-          </span>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
-          <span>Engine Online</span>
-          {user && (
-            <>
-              <span className="text-border">|</span>
-              <span className="text-foreground">{user.primaryEmailAddress?.emailAddress ?? user.username}</span>
-              <button
-                onClick={() => signOut({ redirectUrl: basePath || "/" })}
-                className="text-muted-foreground hover:text-foreground transition-colors border border-border rounded px-2 py-0.5 hover:border-primary/50">
-                Sign out
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-
-      <nav className="flex items-center gap-0.5 px-4 pt-2 border-b border-border bg-card shrink-0">
-        {TABS.map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            data-testid={`tab-${tab.id}`}
-            className={`relative px-4 py-2 text-xs font-medium transition-colors rounded-t outline-none ${
-              activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-foreground"
-            }`}>
-            {tab.label}
-            {activeTab === tab.id && (
-              <motion.div layoutId="active-tab-indicator"
-                className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-            )}
-          </button>
-        ))}
-      </nav>
-
-      <main className="flex-1 overflow-hidden">
-        <AnimatePresence mode="wait">
-          <motion.div key={activeTab}
-            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }}
-            className="h-full">
-            {activeTab === "planner"    && <PlannerTab />}
-            {activeTab === "simulation" && <SimulationTab />}
-            {activeTab === "analytics"  && <AnalyticsTab />}
-            {activeTab === "map"        && <MapTab />}
-            {activeTab === "export"     && <ExportImportTab />}
-            {activeTab === "dashboard"  && <DashboardTab />}
-          </motion.div>
-        </AnimatePresence>
-      </main>
-    </div>
-  );
+// ─── Signed-in app dispatcher (picks supervisor or driver view) ───────────────
+function SignedInApp() {
+  const role = getStoredRole();
+  if (role === "driver") return <DriverApp />;
+  return <SupervisorApp />;
 }
 
 function AppContent() {
+  const [, setLocation] = useLocation();
+
+  const handleRoleSelect = (role: Role, path: "sign-in" | "sign-up") => {
+    setStoredRole(role);
+    setLocation(`/${path}`);
+  };
+
   return (
     <QueryClientProvider client={queryClient}>
       <PlanContextProvider>
@@ -211,26 +386,9 @@ function AppContent() {
           <Switch>
             <Route path="/" component={() => (
               <>
-                <Show when="signed-in"><Dashboard /></Show>
+                <Show when="signed-in"><SignedInApp /></Show>
                 <Show when="signed-out">
-                  <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background gap-8 px-4">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold tracking-tight mb-1">OPTIMAL DUMP PACKING</div>
-                      <div className="text-xs text-muted-foreground font-mono tracking-widest uppercase">
-                        Adaptive Polygon Spot-Point Packing
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <a href={`${basePath}/sign-in`}
-                        className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded hover:opacity-90">
-                        Sign In
-                      </a>
-                      <a href={`${basePath}/sign-up`}
-                        className="px-5 py-2.5 border border-border text-sm rounded hover:bg-muted">
-                        Create Account
-                      </a>
-                    </div>
-                  </div>
+                  <RoleSelectScreen onSelect={handleRoleSelect} />
                 </Show>
               </>
             )} />

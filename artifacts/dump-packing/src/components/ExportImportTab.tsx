@@ -71,8 +71,15 @@ export default function ExportImportTab() {
     setTimeout(() => setMapExported(false), 3000);
   };
 
+  const [importedPlan, setImportedPlan] = useState<any>(null);
+  const [importedGps, setImportedGps] = useState<any[]>([]);
+  const [importSiteName, setImportSiteName] = useState("");
+  const [importSaveMsg, setImportSaveMsg] = useState("");
+  const [importSaving, setImportSaving] = useState(false);
+
   const handleImport = useCallback((file: File) => {
-    setImportError(""); setImportSuccess("");
+    setImportError(""); setImportSuccess(""); setImportedPlan(null); setImportedGps([]);
+    const suggestedName = file.name.replace(/\.(json)$/i, "").replace(/[-_]/g, " ");
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -84,6 +91,9 @@ export default function ExportImportTab() {
         setMapGpsPts(data.gpsPolygon);
         if (data.plan.entryPoint) setMapEntryPoint(data.plan.entryPoint);
         if (data.plan.exitPoint) setMapExitPoint(data.plan.exitPoint);
+        setImportedPlan(data.plan);
+        setImportedGps(data.gpsPolygon);
+        setImportSiteName(suggestedName);
         setImportSuccess(`Imported ${data.plan.spots.length} spots into Map/GPS tab ✓`);
       } catch {
         setImportError("Failed to parse — ensure it is a valid plan JSON");
@@ -91,6 +101,29 @@ export default function ExportImportTab() {
     };
     reader.readAsText(file);
   }, [setMapPlan, setMapGpsPts, setMapEntryPoint, setMapExitPoint]);
+
+  const handleSaveImportedSite = async () => {
+    if (!importedPlan || !importSiteName.trim()) { setImportSaveMsg("Enter a site name"); return; }
+    setImportSaving(true); setImportSaveMsg("");
+    try {
+      await api.sites.save({
+        id: `site-${Date.now()}`,
+        name: importSiteName.trim(),
+        truckId: selectedTruck?.id ?? "",
+        truckName: selectedTruck?.name ?? "",
+        polygon: importedPlan.polygon,
+        gpsPolygon: importedGps,
+        plan: importedPlan,
+      });
+      setImportSaveMsg(`"${importSiteName.trim()}" added to Dashboard ✓`);
+      setImportedPlan(null);
+      setTimeout(() => setImportSaveMsg(""), 4000);
+    } catch (err: any) {
+      setImportSaveMsg(`Error: ${err.message}`);
+    } finally {
+      setImportSaving(false);
+    }
+  };
 
   const handleSaveSite = async (source: "planner" | "map") => {
     const plan = source === "planner" ? currentPlan : mapPlan;
@@ -217,6 +250,35 @@ export default function ExportImportTab() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="mt-2 text-xs text-green-400">
               {importSuccess}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Save imported plan to Dashboard */}
+        <AnimatePresence>
+          {importedPlan && (
+            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="mt-4 border-t border-border pt-4">
+              <div className="text-xs font-semibold text-amber-400 mb-2">↗ Save to Dashboard</div>
+              <p className="text-xs text-muted-foreground mb-2">
+                {importedPlan.spots.length} spots loaded — give this site a name to track progress in the Dashboard.
+              </p>
+              <input
+                type="text" value={importSiteName} onChange={(e) => setImportSiteName(e.target.value)}
+                placeholder="Site name…"
+                className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted-foreground focus:border-primary outline-none mb-2"
+              />
+              <button
+                onClick={handleSaveImportedSite}
+                disabled={importSaving || !importSiteName.trim()}
+                className="w-full py-2 text-xs bg-amber-500/10 text-amber-400 border border-amber-500/40 rounded font-semibold disabled:opacity-40 hover:bg-amber-500/20">
+                {importSaving ? "Saving…" : "Save as Site →"}
+              </button>
+              {importSaveMsg && (
+                <div className={`mt-1.5 text-xs ${importSaveMsg.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
+                  {importSaveMsg}
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

@@ -328,7 +328,7 @@ export default function MapTab() {
     setSelectedSpot(null);
 
     const angles: number[] = [];
-    for (let a = 0; a < 60; a += 5) angles.push(a);
+    for (let a = 0; a < 60; a += 1) angles.push(a);
 
     let idx = 0;
     let localScores: RotScore[] = [], localResults: LocalPackResult[] = [];

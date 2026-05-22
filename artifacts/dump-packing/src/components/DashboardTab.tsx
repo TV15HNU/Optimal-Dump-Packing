@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
-import type { LocalPackResult, SpotLocal } from "@/engine/localEngine";
+import type { LocalPackResult } from "@/engine/localEngine";
 
 interface SiteSummary {
   id: string;
@@ -17,29 +17,44 @@ interface SiteSummary {
 interface SiteDetail extends SiteSummary {
   plan: LocalPackResult;
   polygon: any[];
-  spotProgress: { spot_id: number; done: boolean }[];
+  spotProgress: { spot_id: number; done: boolean; done_at?: string }[];
   progressHistory: { spots_done: number; total_spots: number; snapshot_at: string }[];
 }
 
-function MiniCanvas({ plan, spotProgress }: { plan: LocalPackResult; spotProgress: { spot_id: number; done: boolean }[] }) {
+// ─── High-resolution packing canvas (matches Planner quality) ───────────────
+function SiteCanvas({ plan, spotProgress, width = 540, height = 300 }: {
+  plan: LocalPackResult;
+  spotProgress: { spot_id: number; done: boolean }[];
+  width?: number;
+  height?: number;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const doneSet = new Set(spotProgress.filter((s) => s.done).map((s) => s.spot_id));
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !plan?.polygon?.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    ctx.scale(dpr, dpr);
 
-    const W = canvas.width, H = canvas.height;
+    const W = width, H = height;
     ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#0f1117";
+    ctx.fillRect(0, 0, W, H);
 
     const pts = plan.polygon;
     const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs);
     const minY = Math.min(...ys), maxY = Math.max(...ys);
     const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
-    const pad = 12;
+    const pad = 24;
     const sx = (W - pad * 2) / rangeX, sy = (H - pad * 2) / rangeY;
     const scale = Math.min(sx, sy);
     const offX = pad + (W - pad * 2 - rangeX * scale) / 2;
@@ -47,26 +62,78 @@ function MiniCanvas({ plan, spotProgress }: { plan: LocalPackResult; spotProgres
     const tx = (x: number) => offX + (x - minX) * scale;
     const ty = (y: number) => offY + (y - minY) * scale;
 
+    // Inset polygon (turning radius buffer)
+    if (plan.insetPolygon?.length) {
+      ctx.beginPath();
+      plan.insetPolygon.forEach((p, i) =>
+        i === 0 ? ctx.moveTo(tx(p.x), ty(p.y)) : ctx.lineTo(tx(p.x), ty(p.y))
+      );
+      ctx.closePath();
+      ctx.fillStyle = "rgba(26,31,46,0.6)";
+      ctx.fill();
+    }
+
+    // Outer polygon
     ctx.beginPath();
     pts.forEach((p, i) => i === 0 ? ctx.moveTo(tx(p.x), ty(p.y)) : ctx.lineTo(tx(p.x), ty(p.y)));
     ctx.closePath();
-    ctx.fillStyle = "rgba(30,36,50,0.8)";
-    ctx.fill();
-    ctx.strokeStyle = "#475569";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#f59e0b";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    const r = Math.max(2, Math.min(5, scale * 3));
-    for (const spot of (plan.spots ?? [])) {
+    // Grid lines (subtle)
+    ctx.strokeStyle = "rgba(71,85,105,0.15)";
+    ctx.lineWidth = 0.5;
+    for (let gx = minX; gx <= maxX; gx += 10) {
+      ctx.beginPath(); ctx.moveTo(tx(gx), ty(minY)); ctx.lineTo(tx(gx), ty(maxY)); ctx.stroke();
+    }
+    for (let gy = minY; gy <= maxY; gy += 10) {
+      ctx.beginPath(); ctx.moveTo(tx(minX), ty(gy)); ctx.lineTo(tx(maxX), ty(gy)); ctx.stroke();
+    }
+
+    // Spots
+    const spots = plan.spots ?? [];
+    const r = Math.max(3, Math.min(7, scale * 2.5));
+    for (const spot of spots) {
       const isDone = doneSet.has(spot.id);
-      ctx.beginPath();
-      ctx.arc(tx(spot.x), ty(spot.y), r, 0, Math.PI * 2);
+      const cx = tx(spot.x), cy = ty(spot.y);
+
+      // Glow
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.5);
+      if (isDone) {
+        gradient.addColorStop(0, "rgba(34,197,94,0.35)");
+        gradient.addColorStop(1, "rgba(34,197,94,0)");
+      } else {
+        gradient.addColorStop(0, "rgba(239,68,68,0.25)");
+        gradient.addColorStop(1, "rgba(239,68,68,0)");
+      }
+      ctx.beginPath(); ctx.arc(cx, cy, r * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = gradient; ctx.fill();
+
+      // Core dot
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = isDone ? "#22c55e" : "#ef4444";
       ctx.fill();
+      ctx.strokeStyle = isDone ? "rgba(134,239,172,0.6)" : "rgba(252,165,165,0.4)";
+      ctx.lineWidth = 0.75;
+      ctx.stroke();
     }
-  }, [plan, doneSet]);
 
-  return <canvas ref={canvasRef} width={200} height={130} className="rounded border border-border w-full" />;
+    // Entry / Exit markers
+    const drawMarker = (pt: { x: number; y: number }, label: string, color: string) => {
+      const cx = tx(pt.x), cy = ty(pt.y);
+      ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 8px Inter"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(label, cx, cy);
+    };
+    if (plan.entryPoint) drawMarker(plan.entryPoint, "E", "#3b82f6");
+    if (plan.exitPoint) drawMarker(plan.exitPoint, "X", "#8b5cf6");
+
+  }, [plan, doneSet, width, height]);
+
+  return <canvas ref={canvasRef} className="rounded border border-border w-full" style={{ width, height }} />;
 }
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
@@ -89,29 +156,133 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 }
 
 function HistorySparkline({ history }: { history: { spots_done: number; total_spots: number; snapshot_at: string }[] }) {
-  if (history.length < 2) return <div className="text-[11px] text-muted-foreground">No history yet</div>;
+  if (history.length < 2) return <div className="text-[11px] text-muted-foreground">No history yet — demo mode will populate this.</div>;
 
-  const W = 200, H = 40;
-  const max = history[history.length - 1]?.total_spots || 1;
+  const W = 300, H = 50;
+  const max = Math.max(...history.map((h) => h.total_spots), 1);
   const pts = history.map((h, i) => ({
     x: (i / (history.length - 1)) * W,
-    y: H - (h.spots_done / max) * H,
+    y: H - (h.spots_done / max) * H * 0.9,
   }));
   const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const area = `${d} L${W},${H} L0,${H} Z`;
 
   return (
     <div>
       <div className="text-[10px] text-muted-foreground mb-1 font-mono">Progress history</div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+        <defs>
+          <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill="url(#spark-fill)" />
         <path d={d} fill="none" stroke="#f59e0b" strokeWidth="1.5" />
-        {pts.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="2" fill="#f59e0b" />
+        {pts.filter((_, i) => i % Math.max(1, Math.floor(pts.length / 8)) === 0 || i === pts.length - 1).map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r="2.5" fill="#f59e0b" />
         ))}
       </svg>
     </div>
   );
 }
 
+// ─── Daily Report Modal ──────────────────────────────────────────────────────
+function DailyReportModal({ sites, onClose }: { sites: SiteSummary[]; onClose: () => void }) {
+  const today = new Date().toDateString();
+  const totalSpots = sites.reduce((a, s) => a + s.total_spots, 0);
+  const totalDone = sites.reduce((a, s) => a + s.spots_done, 0);
+  const runningCount = sites.filter((s) => s.status === "running").length;
+  const completedToday = sites.filter((s) =>
+    s.status === "completed" && new Date(s.updated_at).toDateString() === today
+  ).length;
+
+  // Estimate truck trips: 1 trip per spot (each spot = 1 truck dump)
+  const truckTrips = totalDone;
+  const tripsPerSite = runningCount > 0 ? Math.round(totalDone / Math.max(runningCount, 1)) : 0;
+  const completionRate = totalSpots > 0 ? Math.round((totalDone / totalSpots) * 100) : 0;
+  const efficiency = completionRate > 75 ? "High" : completionRate > 40 ? "Moderate" : "Low";
+  const effColor = completionRate > 75 ? "text-green-400" : completionRate > 40 ? "text-amber-400" : "text-red-400";
+
+  const stats = [
+    { label: "Spots Filled Today", value: totalDone, sub: "across all active sites", color: "text-primary" },
+    { label: "Truck Trips (Est.)", value: truckTrips, sub: `≈ ${tripsPerSite} trips/site avg`, color: "text-cyan-400" },
+    { label: "Sites Active", value: runningCount, sub: `${completedToday} completed today`, color: "text-amber-400" },
+    { label: "Remaining Spots", value: totalSpots - totalDone, sub: `${completionRate}% overall complete`, color: "text-red-400" },
+  ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+      onClick={onClose}>
+      <motion.div
+        initial={{ scale: 0.92, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 10 }}
+        className="bg-card border border-border rounded w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div>
+            <div className="text-sm font-bold">Daily Operations Report</div>
+            <div className="text-[11px] text-muted-foreground font-mono">
+              {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg leading-none">✕</button>
+        </div>
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 gap-3 p-5">
+          {stats.map((s) => (
+            <div key={s.label} className="bg-secondary/50 border border-border rounded p-3">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{s.label}</div>
+              <div className={`text-2xl font-bold font-mono ${s.color}`}>{s.value}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Efficiency badge */}
+        <div className="px-5 pb-4">
+          <div className="bg-secondary/30 border border-border rounded p-3 flex items-center justify-between">
+            <div className="text-xs text-muted-foreground">Overall site efficiency</div>
+            <div className={`text-sm font-bold ${effColor}`}>{efficiency} ({completionRate}%)</div>
+          </div>
+        </div>
+
+        {/* Site breakdown */}
+        {sites.length > 0 && (
+          <div className="px-5 pb-5">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2 font-semibold">Per-Site Breakdown</div>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {sites.map((s) => {
+                const pct = s.total_spots > 0 ? Math.round((s.spots_done / s.total_spots) * 100) : 0;
+                return (
+                  <div key={s.id} className="flex items-center gap-2 text-xs">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.status === "completed" ? "bg-green-500" : "bg-amber-400"}`} />
+                    <span className="flex-1 truncate font-mono">{s.name}</span>
+                    <span className="text-muted-foreground shrink-0">{s.spots_done}/{s.total_spots}</span>
+                    <span className={`shrink-0 ${pct === 100 ? "text-green-400" : "text-primary"}`}>{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="px-5 pb-5 flex gap-2">
+          <button onClick={onClose}
+            className="flex-1 py-2 text-xs border border-border rounded hover:bg-muted font-semibold">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Main Dashboard ──────────────────────────────────────────────────────────
 export default function DashboardTab() {
   const [sites, setSites] = useState<SiteSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,6 +290,10 @@ export default function DashboardTab() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [filter, setFilter] = useState<"all" | "running" | "completed">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [demoActive, setDemoActive] = useState(false);
+  const [demoMsg, setDemoMsg] = useState("");
+  const [showReport, setShowReport] = useState(false);
+  const demoRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchSites = useCallback(async () => {
     try {
@@ -132,6 +307,13 @@ export default function DashboardTab() {
   }, []);
 
   useEffect(() => { fetchSites(); }, [fetchSites]);
+
+  // Reload sites list every 15s while demo is active
+  useEffect(() => {
+    if (!demoActive) return;
+    const iv = setInterval(fetchSites, 15000);
+    return () => clearInterval(iv);
+  }, [demoActive, fetchSites]);
 
   const openDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -158,6 +340,43 @@ export default function DashboardTab() {
     fetchSites();
   }, [fetchSites, selectedSite]);
 
+  // ── Demo mode: tick one spot every 10s ──
+  const startDemo = useCallback(() => {
+    if (!selectedSite) { setDemoMsg("Select a site first"); return; }
+    setDemoActive(true);
+    setDemoMsg("Demo running…");
+
+    demoRef.current = setInterval(async () => {
+      setSelectedSite((prev) => {
+        if (!prev) return prev;
+        const pending = (prev.plan.spots ?? []).filter((s) => !prev.spotProgress.find((sp) => sp.spot_id === s.id && sp.done));
+        if (pending.length === 0) {
+          clearInterval(demoRef.current!); demoRef.current = null;
+          setDemoActive(false); setDemoMsg("All spots filled ✓");
+          return { ...prev, status: "completed" };
+        }
+        const next = pending[0];
+        api.sites.updateProgress(prev.id, next.id, true, "demo-driver").catch(() => {});
+        const newProgress = [
+          ...prev.spotProgress.filter((sp) => sp.spot_id !== next.id),
+          { spot_id: next.id, done: true, done_at: new Date().toISOString() },
+        ];
+        const newDone = newProgress.filter((sp) => sp.done).length;
+        return { ...prev, spots_done: newDone, spotProgress: newProgress,
+          progressHistory: [...prev.progressHistory, { spots_done: newDone, total_spots: prev.total_spots, snapshot_at: new Date().toISOString() }],
+        };
+      });
+    }, 10000);
+  }, [selectedSite]);
+
+  const stopDemo = useCallback(() => {
+    if (demoRef.current) { clearInterval(demoRef.current); demoRef.current = null; }
+    setDemoActive(false); setDemoMsg("");
+    if (selectedSite) openDetail(selectedSite.id);
+  }, [selectedSite, openDetail]);
+
+  useEffect(() => () => { if (demoRef.current) clearInterval(demoRef.current); }, []);
+
   const filtered = sites.filter((s) => filter === "all" || s.status === filter);
   const running = sites.filter((s) => s.status === "running").length;
   const completed = sites.filter((s) => s.status === "completed").length;
@@ -165,18 +384,18 @@ export default function DashboardTab() {
   const totalDone = sites.reduce((a, s) => a + s.spots_done, 0);
 
   return (
-    <div className="flex h-full gap-4 p-4 overflow-hidden">
+    <div className="flex h-full gap-4 p-4 overflow-hidden relative">
 
       {/* ── Left: site list ── */}
-      <div className="flex flex-col gap-3 w-80 shrink-0 overflow-y-auto">
+      <div className="flex flex-col gap-3 w-72 shrink-0 overflow-y-auto">
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 gap-2">
           {[
-            { label: "Running", value: running, color: "text-amber-400" },
-            { label: "Completed", value: completed, color: "text-green-400" },
+            { label: "Running",    value: running,    color: "text-amber-400" },
+            { label: "Completed",  value: completed,  color: "text-green-400" },
             { label: "Total Spots", value: totalSpots, color: "text-primary" },
-            { label: "Spots Done", value: totalDone, color: "text-cyan-400" },
+            { label: "Spots Done", value: totalDone,  color: "text-cyan-400" },
           ].map((s) => (
             <div key={s.label} className="bg-card border border-border rounded p-2.5">
               <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.label}</div>
@@ -199,7 +418,7 @@ export default function DashboardTab() {
 
         {/* Sites list */}
         {loading ? (
-          <div className="text-xs text-muted-foreground text-center py-8">Loading sites…</div>
+          <div className="text-xs text-muted-foreground text-center py-8 animate-pulse">Loading sites…</div>
         ) : filtered.length === 0 ? (
           <div className="text-xs text-muted-foreground text-center py-8 border border-dashed border-border rounded p-4">
             No sites found.<br />Save a plan from Planner or Map/GPS to create a site.
@@ -231,7 +450,7 @@ export default function DashboardTab() {
       </div>
 
       {/* ── Right: site detail ── */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
+      <div className="flex-1 min-w-0 overflow-y-auto pb-4">
         {!selectedSite && !detailLoading && (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             Select a site to view details
@@ -253,7 +472,9 @@ export default function DashboardTab() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <div className="text-base font-bold">{selectedSite.name}</div>
-                    <div className="text-xs text-muted-foreground font-mono">{selectedSite.truck_name} · {selectedSite.total_spots} spots total</div>
+                    <div className="text-xs text-muted-foreground font-mono">
+                      {selectedSite.truck_name} · {selectedSite.total_spots} spots total
+                    </div>
                     <div className="text-[11px] text-muted-foreground mt-0.5">
                       Created {new Date(selectedSite.created_at).toLocaleDateString()} ·
                       Updated {new Date(selectedSite.updated_at).toLocaleDateString()}
@@ -285,30 +506,67 @@ export default function DashboardTab() {
                 <ProgressBar done={selectedSite.spots_done} total={selectedSite.total_spots} />
               </div>
 
-              {/* Canvas snapshot */}
+              {/* Demo controls */}
+              <div className="bg-card border border-border rounded p-3 flex items-center gap-3">
+                <div className="flex-1">
+                  <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-0.5">Simulation Demo</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {demoActive
+                      ? "Filling one spot every 10 s — watch canvas & sparkline update in real time"
+                      : "Auto-fill spots every 10s to demonstrate live progress tracking"}
+                  </div>
+                  {demoMsg && <div className={`text-[11px] mt-1 ${demoMsg.includes("✓") ? "text-green-400" : demoMsg.includes("Select") ? "text-amber-400" : "text-cyan-400"}`}>{demoMsg}</div>}
+                </div>
+                {demoActive ? (
+                  <button onClick={stopDemo}
+                    className="shrink-0 px-3 py-2 text-xs bg-red-500/10 text-red-400 border border-red-500/30 rounded font-semibold hover:bg-red-500/20">
+                    Stop
+                  </button>
+                ) : (
+                  <button onClick={startDemo}
+                    className="shrink-0 px-3 py-2 text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded font-semibold hover:bg-cyan-500/20">
+                    ▶ Start Demo
+                  </button>
+                )}
+              </div>
+
+              {/* Site canvas (high-res) */}
               <div className="bg-card border border-border rounded p-4">
                 <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">Site Map</div>
-                <div className="text-[11px] text-muted-foreground mb-2">
-                  <span className="inline-flex items-center gap-1 mr-3">
-                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Done
+                <div className="text-[11px] text-muted-foreground mb-3 flex items-center gap-4">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
+                    Done ({selectedSite.spots_done})
                   </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Pending
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block shadow-[0_0_6px_rgba(239,68,68,0.5)]" />
+                    Pending ({selectedSite.total_spots - selectedSite.spots_done})
                   </span>
+                  {selectedSite.plan.entryPoint && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Entry/Exit
+                    </span>
+                  )}
                 </div>
-                <MiniCanvas plan={selectedSite.plan} spotProgress={selectedSite.spotProgress ?? []} />
+                <SiteCanvas
+                  plan={selectedSite.plan}
+                  spotProgress={selectedSite.spotProgress ?? []}
+                />
               </div>
 
               {/* Progress history */}
               <div className="bg-card border border-border rounded p-4">
-                <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">Progress Timeline</div>
+                <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-3">Progress Timeline</div>
                 <HistorySparkline history={selectedSite.progressHistory ?? []} />
                 {(selectedSite.progressHistory ?? []).length > 0 && (
-                  <div className="mt-2 text-[11px] font-mono text-muted-foreground">
-                    {selectedSite.progressHistory.slice(-3).reverse().map((h, i) => (
+                  <div className="mt-3 text-[11px] font-mono text-muted-foreground">
+                    {selectedSite.progressHistory.slice(-4).reverse().map((h, i) => (
                       <div key={i} className="flex justify-between border-t border-border pt-1 mt-1">
                         <span>{new Date(h.snapshot_at).toLocaleTimeString()}</span>
                         <span className="text-primary">{h.spots_done}/{h.total_spots} spots</span>
+                        <span className="text-muted-foreground">
+                          {h.total_spots > 0 ? Math.round((h.spots_done / h.total_spots) * 100) : 0}%
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -338,7 +596,20 @@ export default function DashboardTab() {
         </AnimatePresence>
       </div>
 
-      {/* Confirm delete */}
+      {/* ── Bottom-left: Daily Report button ── */}
+      <div className="absolute bottom-5 left-5">
+        <button onClick={() => setShowReport(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-card border border-border rounded text-xs font-semibold hover:border-primary/50 hover:bg-primary/5 transition-colors shadow-lg">
+          <span className="text-primary">📋</span>
+          Daily Report
+        </button>
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {showReport && <DailyReportModal sites={sites} onClose={() => setShowReport(false)} />}
+      </AnimatePresence>
+
       <AnimatePresence>
         {confirmDelete && (
           <motion.div
@@ -350,7 +621,9 @@ export default function DashboardTab() {
               className="bg-card border border-border rounded p-5 w-80"
               onClick={(e) => e.stopPropagation()}>
               <div className="text-sm font-semibold mb-2">Delete site?</div>
-              <div className="text-xs text-muted-foreground mb-4">This will permanently remove the site and all its progress history.</div>
+              <div className="text-xs text-muted-foreground mb-4">
+                This will permanently remove the site and all its progress history.
+              </div>
               <div className="flex gap-2">
                 <button onClick={() => setConfirmDelete(null)}
                   className="flex-1 py-2 text-xs border border-border rounded hover:bg-muted">Cancel</button>
