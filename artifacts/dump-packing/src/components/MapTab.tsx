@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  runAtAngle, projectToNearestEdge, DEFAULT_TRUCKS,
-  type TruckConfig, type RotScore, type LocalPackResult, type Pt,
+  runAtAngle, projectToNearestEdge, fillGaps, DEFAULT_TRUCKS,
+  type TruckConfig, type RotScore, type LocalPackResult, type Pt, type SpotLocal,
 } from "@/engine/localEngine";
 import { usePlanContext } from "@/lib/planContext";
 import type { GpsPt } from "@/lib/planContext";
@@ -245,6 +245,15 @@ export default function MapTab() {
   const [exitGps, setExitGps]         = useState<GpsPt | null>(null);
   const [localEntry, setLocalEntry]   = useState<Pt | null>(null);
 
+  // Manual entry/exit coordinate inputs
+  const [entryInput, setEntryInput]   = useState("");
+  const [exitInput, setExitInput]     = useState("");
+  const [eeInputError, setEeInputError] = useState("");
+
+  // Gap fill
+  const [gapFilled, setGapFilled]     = useState(false);
+  const [gapFillCount, setGapFillCount] = useState(0);
+
   // Selected spot info panel
   const [selectedSpot, setSelectedSpot] = useState<SpotMarkerData | null>(null);
 
@@ -298,6 +307,8 @@ export default function MapTab() {
     setSweeping(false); setSweepAngle(null); setBestSoFar(null);
     setGpsOrigin(null);
     setMapEEPhase("idle"); setEntryGps(null); setExitGps(null); setLocalEntry(null);
+    setEntryInput(""); setExitInput(""); setEeInputError("");
+    setGapFilled(false); setGapFillCount(0);
     setSelectedSpot(null); setImportError("");
     if (sweepRef.current) { clearInterval(sweepRef.current); sweepRef.current = null; }
     setFitTo(null);
@@ -393,8 +404,77 @@ export default function MapTab() {
 
   const handleGenerate = useCallback(() => {
     if (!hasPts) return;
+    setGapFilled(false); setGapFillCount(0);
     runSweep(activePts, truck);
   }, [hasPts, activePts, truck, runSweep]);
+
+  const handleFillGaps = useCallback(() => {
+    if (!finalResult || gapFilled) return;
+    const gapPts = fillGaps(finalResult.insetPolygon, finalResult.spots, truck);
+    if (gapPts.length === 0) { setGapFilled(true); setGapFillCount(0); return; }
+    const baseId = finalResult.spots.length;
+    const gapSpots: SpotLocal[] = gapPts.map((p, i) => ({
+      id: baseId + i, x: p.x, y: p.y,
+      laneId: -1, sequenceInLane: i, globalSequence: baseId + i,
+      zoneId: 1, rotation: finalResult.bestRotation, safe: true,
+    }));
+    const totalSpots = finalResult.spots.length + gapSpots.length;
+    const updated: LocalPackResult = {
+      ...finalResult,
+      spots: [...finalResult.spots, ...gapSpots],
+      metrics: {
+        ...finalResult.metrics,
+        spotCount: totalSpots,
+        improvementPercent: finalResult.metrics.squareGridCount > 0
+          ? ((totalSpots - finalResult.metrics.squareGridCount) / finalResult.metrics.squareGridCount) * 100 : 0,
+      },
+    };
+    setFinalResult(updated); setLiveResult(updated); setMapPlan(updated);
+    setGapFilled(true); setGapFillCount(gapSpots.length);
+  }, [finalResult, gapFilled, truck, setMapPlan]);
+
+  const applyCoordEE = useCallback(() => {
+    setEeInputError("");
+    if (!gpsOrigin || !finalResult) { setEeInputError("Generate a plan first"); return; }
+
+    const parseCoord = (s: string): GpsPt | null => {
+      const parts = s.trim().split(/[,\s]+/);
+      if (parts.length < 2) return null;
+      const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
+      if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+      return { lat, lng };
+    };
+
+    const entryParsed = entryInput.trim() ? parseCoord(entryInput) : null;
+    const exitParsed = exitInput.trim() ? parseCoord(exitInput) : null;
+
+    if (entryInput.trim() && !entryParsed) { setEeInputError("Invalid entry coordinates (lat, lng)"); return; }
+    if (exitInput.trim() && !exitParsed) { setEeInputError("Invalid exit coordinates (lat, lng)"); return; }
+
+    let updatedResult = { ...finalResult };
+    let newLocalEntry: Pt | null = localEntry;
+
+    if (entryParsed) {
+      const localClick = gpsToLocalWithOrigin([entryParsed], gpsOrigin)[0];
+      const snapped = projectToNearestEdge(localClick, finalResult.polygon);
+      const snappedGps = localToGps(snapped, gpsOrigin);
+      setEntryGps(snappedGps); newLocalEntry = snapped; setLocalEntry(snapped);
+      setMapEntryPoint(snapped);
+      updatedResult = { ...updatedResult, entryPoint: snapped };
+    }
+
+    if (exitParsed) {
+      const localClick = gpsToLocalWithOrigin([exitParsed], gpsOrigin)[0];
+      const snapped = projectToNearestEdge(localClick, finalResult.polygon);
+      const snappedGps = localToGps(snapped, gpsOrigin);
+      setExitGps(snappedGps);
+      setMapExitPoint(snapped);
+      updatedResult = { ...updatedResult, exitPoint: snapped };
+    }
+
+    setFinalResult(updatedResult); setMapPlan(updatedResult);
+    setMapEEPhase(entryParsed && exitParsed ? "done" : entryParsed ? "exit" : "entry");
+  }, [gpsOrigin, finalResult, entryInput, exitInput, localEntry, setMapEntryPoint, setMapExitPoint, setMapPlan]);
 
   const handleAddCustomTruck = useCallback(() => {
     if (!customForm.name.trim()) { setCustomError("Name is required"); return; }
@@ -576,6 +656,53 @@ export default function MapTab() {
           )}
         </AnimatePresence>
 
+        {/* Entry/Exit coordinate inputs — always shown after plan */}
+        <AnimatePresence>
+          {(finalResult || sweeping) && (
+            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="bg-card border border-primary/30 rounded p-3">
+              <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">Entry / Exit Coordinates</div>
+              <div className="flex flex-col gap-1.5 text-xs mb-2">
+                <div>
+                  <label className="text-muted-foreground block mb-0.5 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Entry (lat, lng)
+                  </label>
+                  <input
+                    type="text" value={entryInput} onChange={(e) => setEntryInput(e.target.value)}
+                    placeholder="20.5937, 78.9629"
+                    className="w-full bg-secondary border border-border rounded px-2 py-1 font-mono focus:border-green-500 outline-none text-foreground"
+                  />
+                  {entryGps && <div className="text-green-400 font-mono text-[10px] mt-0.5">✓ {entryGps.lat.toFixed(5)}, {entryGps.lng.toFixed(5)}</div>}
+                </div>
+                <div>
+                  <label className="text-muted-foreground block mb-0.5 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Exit (lat, lng)
+                  </label>
+                  <input
+                    type="text" value={exitInput} onChange={(e) => setExitInput(e.target.value)}
+                    placeholder="20.5920, 78.9710"
+                    className="w-full bg-secondary border border-border rounded px-2 py-1 font-mono focus:border-red-500 outline-none text-foreground"
+                  />
+                  {exitGps && <div className="text-red-400 font-mono text-[10px] mt-0.5">✓ {exitGps.lat.toFixed(5)}, {exitGps.lng.toFixed(5)}</div>}
+                </div>
+                {eeInputError && <div className="text-red-400 text-[11px]">{eeInputError}</div>}
+                <button onClick={applyCoordEE}
+                  disabled={!finalResult || sweeping}
+                  className="w-full py-1.5 bg-primary/10 text-primary border border-primary/30 rounded text-xs font-semibold hover:bg-primary/20 disabled:opacity-40">
+                  Apply Entry / Exit
+                </button>
+                <div className="text-[10px] text-muted-foreground">Or click the map after plan generates — snaps to boundary.</div>
+                {(entryGps || exitGps) && (
+                  <button onClick={resetEE}
+                    className="w-full py-1 border border-dashed border-border rounded hover:border-primary hover:text-primary text-muted-foreground text-[11px]">
+                    Reset Entry / Exit
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Actions */}
         <div className="bg-card border border-border rounded p-3 flex flex-col gap-2">
           <button onClick={handleGenerate}
@@ -585,15 +712,20 @@ export default function MapTab() {
             {sweeping ? `Scanning ${sweepAngle}°…` : !hasPts ? "Add ≥ 3 points first" : "Generate Plan"}
           </button>
 
-          {/* Import Plan */}
-          <button onClick={() => fileInputRef.current?.click()}
-            className="w-full py-1.5 text-xs bg-secondary border border-border rounded hover:bg-muted">
-            ↑ Import Plan JSON
-          </button>
-          <input ref={fileInputRef} type="file" accept=".json" className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0]; if (f) handleImportPlan(f); e.target.value = "";
-            }} />
+          {/* Fill Edge Gaps */}
+          <AnimatePresence>
+            {finalResult && !sweeping && (
+              <motion.button
+                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                onClick={handleFillGaps}
+                disabled={gapFilled}
+                className="w-full text-xs py-2 bg-secondary border border-dashed border-amber-500/40 text-amber-400 rounded font-semibold disabled:opacity-50 hover:border-amber-500 hover:bg-amber-500/10 transition-colors">
+                {gapFilled
+                  ? gapFillCount > 0 ? `✓ Gap-fill applied (+${gapFillCount} spots · ${finalResult.metrics.spotCount} total · ${finalResult.bestRotation}°)` : "✓ No gaps found"
+                  : "Fill Edge Gaps ✦"}
+              </motion.button>
+            )}
+          </AnimatePresence>
 
           {importError && (
             <div className="text-red-400 text-[11px] bg-red-950/30 border border-red-900 rounded px-2 py-1">

@@ -7,6 +7,7 @@ import {
 import { useGetPresets } from "@workspace/api-client-react";
 import PackingCanvas from "./PackingCanvas";
 import { usePlanContext } from "@/lib/planContext";
+import { api } from "@/lib/api";
 
 const PRESETS_POLY: { id: string; name: string; polygon: Pt[] }[] = [
   { id: "rect",  name: "Rectangle 200×150m",  polygon: [{x:0,y:0},{x:200,y:0},{x:200,y:150},{x:0,y:150}] },
@@ -58,6 +59,11 @@ export default function PlannerTab() {
   const [customForm, setCustomForm]         = useState({ ...BLANK_CUSTOM });
   const [customError, setCustomError]       = useState("");
 
+  // Truck persistence
+  const [saveTruckMsg, setSaveTruckMsg]         = useState("");
+  const [pendingOverride, setPendingOverride]   = useState<TruckConfig | null>(null);
+  const [dbTrucksLoaded, setDbTrucksLoaded]     = useState(false);
+
   const sweepRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const apiTrucks = (presets?.truckProfiles as TruckConfig[] | undefined)
@@ -106,6 +112,15 @@ export default function PlannerTab() {
   }, [stopSweep, setCurrentPlan, setEntryPoint, setExitPoint, setSelectedTruck]);
 
   useEffect(() => () => stopSweep(), [stopSweep]);
+
+  // Load persisted trucks from DB on mount
+  useEffect(() => {
+    if (dbTrucksLoaded) return;
+    api.trucks.list().then((trucks: TruckConfig[]) => {
+      trucks.forEach((t) => addCustomTruck(t));
+      setDbTrucksLoaded(true);
+    }).catch(() => setDbTrucksLoaded(true));
+  }, [addCustomTruck, dbTrucksLoaded]);
 
   // Sync polygon to context
   useEffect(() => {
@@ -215,16 +230,29 @@ export default function PlannerTab() {
     }
   }, [finalResult, setCurrentPlan, setEntryPoint, setExitPoint]);
 
+  const doSaveTruckToDb = useCallback(async (truck: TruckConfig, force = false) => {
+    try {
+      if (!force) {
+        const existing: TruckConfig[] = await api.trucks.list().catch(() => []);
+        const clash = existing.find((t) => t.name.toLowerCase() === truck.name.toLowerCase());
+        if (clash) { setPendingOverride({ ...truck, id: clash.id }); return; }
+      }
+      await api.trucks.save(truck);
+      setSaveTruckMsg(`"${truck.name}" saved to database ✓`);
+      setTimeout(() => setSaveTruckMsg(""), 3000);
+    } catch { setSaveTruckMsg("Failed to save truck"); }
+  }, []);
+
   const handleAddCustomTruck = useCallback(() => {
     if (!customForm.name.trim()) { setCustomError("Name is required"); return; }
     if (customForm.width <= 0 || customForm.length <= 0 || customForm.turningRadius <= 0) {
       setCustomError("Width, Length and Turning Radius must be > 0"); return;
     }
     const id = `custom-${customForm.name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
-    addCustomTruck({ id, ...customForm });
+    const truck = { id, ...customForm };
+    addCustomTruck(truck);
     setSelectedTruckId(id);
     setCustomError(""); setShowCustomForm(false); setCustomForm({ ...BLANK_CUSTOM });
-    const truck = { id, ...customForm };
     setSelectedTruck(truck);
     if (polygon.length >= 3) runSweep(polygon, truck, rotStep);
   }, [customForm, addCustomTruck, polygon, rotStep, runSweep, setSelectedTruck]);
@@ -374,7 +402,57 @@ export default function PlannerTab() {
                   className="w-full py-1.5 bg-primary text-primary-foreground rounded font-semibold hover:opacity-90 mt-1">
                   Add & Select Truck
                 </button>
+                <button
+                  onClick={() => {
+                    if (!customForm.name.trim()) { setCustomError("Name is required"); return; }
+                    const id = `custom-${customForm.name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+                    doSaveTruckToDb({ id, ...customForm });
+                  }}
+                  className="w-full py-1 border border-dashed border-amber-500/40 text-amber-400 rounded text-xs hover:border-amber-500 hover:bg-amber-500/10 transition-colors">
+                  ↑ Save to Database
+                </button>
+                {saveTruckMsg && <div className={`text-[11px] ${saveTruckMsg.startsWith("Failed") ? "text-red-400" : "text-green-400"}`}>{saveTruckMsg}</div>}
               </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Override confirmation modal */}
+        <AnimatePresence>
+          {pendingOverride && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+              onClick={() => setPendingOverride(null)}>
+              <motion.div
+                initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+                className="bg-card border border-border rounded p-5 w-80 mx-4"
+                onClick={(e) => e.stopPropagation()}>
+                <div className="text-sm font-semibold mb-1">Truck name already exists</div>
+                <div className="text-xs text-muted-foreground mb-4">
+                  A truck named <span className="text-foreground font-mono">"{pendingOverride.name}"</span> is already in the database.
+                  Do you want to overwrite it, or save as a new truck?
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setPendingOverride(null)}
+                    className="flex-1 py-2 text-xs border border-border rounded hover:bg-muted">Cancel</button>
+                  <button onClick={async () => {
+                    const newId = `custom-${pendingOverride.name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+                    await doSaveTruckToDb({ ...pendingOverride, id: newId }, true);
+                    setPendingOverride(null);
+                  }}
+                    className="flex-1 py-2 text-xs bg-secondary border border-border rounded hover:bg-muted">
+                    Save New
+                  </button>
+                  <button onClick={async () => {
+                    await doSaveTruckToDb(pendingOverride, true);
+                    setPendingOverride(null);
+                  }}
+                    className="flex-1 py-2 text-xs bg-amber-500/10 text-amber-400 border border-amber-500/40 rounded hover:bg-amber-500/20">
+                    Overwrite
+                  </button>
+                </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -424,7 +502,8 @@ export default function PlannerTab() {
                   tip="Total dump spots after hex packing + gap fill" />
                 {gapFilled && gapFillCount > 0 && (
                   <div className="text-[11px] font-mono text-white/60 flex justify-between">
-                    <span>Gap-fill spots</span><span className="text-white">+{gapFillCount}</span>
+                    <span>Gap-fill spots</span>
+                    <span className="text-white">+{gapFillCount} ({finalResult.metrics.spotCount} total · {finalResult.bestRotation}°)</span>
                   </div>
                 )}
                 <ResultRow label="Grid Spots"  value={String(finalResult.metrics.squareGridCount)}
