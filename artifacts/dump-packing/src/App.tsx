@@ -14,6 +14,8 @@ import AnalyticsTab from "@/components/AnalyticsTab";
 import MapTab from "@/components/MapTab";
 import ExportImportTab from "@/components/ExportImportTab";
 import DashboardTab from "@/components/DashboardTab";
+import DriverWorkTab from "@/components/DriverWorkTab";
+import ExcelBatchTab from "@/components/ExcelBatchTab";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30000, retry: 1 } },
@@ -176,6 +178,7 @@ const DRIVER_TABS = [
   { id: "planner",    label: "Planner" },
   { id: "simulation", label: "Simulation" },
   { id: "map",        label: "Map / GPS" },
+  { id: "work",       label: "Work" },
 ] as const;
 type DriverTabId = typeof DRIVER_TABS[number]["id"];
 
@@ -238,6 +241,7 @@ function DriverApp() {
             {activeTab === "planner"    && <PlannerTab />}
             {activeTab === "simulation" && <SimulationTab />}
             {activeTab === "map"        && <MapTab />}
+            {activeTab === "work"       && <DriverWorkTab />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -253,6 +257,7 @@ const SUPERVISOR_TABS = [
   { id: "map",        label: "Map / GPS" },
   { id: "export",     label: "Export/Import" },
   { id: "dashboard",  label: "Dashboard" },
+  { id: "excel",      label: "Batch Excel" },
 ] as const;
 type SupervisorTabId = typeof SUPERVISOR_TABS[number]["id"];
 
@@ -320,6 +325,7 @@ function SupervisorApp() {
             {activeTab === "map"        && <MapTab />}
             {activeTab === "export"     && <ExportImportTab />}
             {activeTab === "dashboard"  && <DashboardTab />}
+            {activeTab === "excel"      && <ExcelBatchTab />}
           </motion.div>
         </AnimatePresence>
       </main>

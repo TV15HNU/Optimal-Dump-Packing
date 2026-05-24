@@ -67,6 +67,7 @@ function LeafletMap({
   exitGps?: GpsPt | null;
   onSpotClick?: (data: SpotMarkerData) => void;
 }) {
+  const [mapReady, setMapReady] = useState(false);
   const containerRef     = useRef<HTMLDivElement>(null);
   const mapRef           = useRef<any>(null);
   const layerRef         = useRef<any>({ sat: null, osm: null });
@@ -89,6 +90,7 @@ function LeafletMap({
       delete (Ldef.Icon.Default.prototype as any)._getIconUrl;
       const map = Ldef.map(containerRef.current!, { center: INDIA_CENTER, zoom: INDIA_ZOOM });
       mapRef.current = map;
+      setMapReady(true);
       const sat = Ldef.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         { attribution: "Esri", maxZoom: 19 }
@@ -129,7 +131,7 @@ function LeafletMap({
         ).addTo(map);
       }
     });
-  }, [polygonPts]);
+  }, [polygonPts, mapReady]);
 
   // Inset polygon (dashed amber)
   useEffect(() => {
@@ -142,7 +144,7 @@ function LeafletMap({
         { color: "#f59e0b", fill: false, weight: 1.5, dashArray: "6 4", opacity: 0.7 }
       ).addTo(map);
     });
-  }, [insetPolyGps]);
+  }, [insetPolyGps, mapReady]);
 
   // Spot markers — FeatureGroup stays through pan/zoom
   useEffect(() => {
@@ -169,7 +171,7 @@ function LeafletMap({
       group.addTo(map);
       spotGroupRef.current = group;
     });
-  }, [spotMarkers]);
+  }, [spotMarkers, mapReady]);
 
   // Entry marker
   useEffect(() => {
@@ -182,7 +184,7 @@ function LeafletMap({
         radius: 11, color: "#059669", fillColor: "#10b981", fillOpacity: 0.95, weight: 3,
       }).bindTooltip("IN", { permanent: true, direction: "top" }).addTo(map);
     });
-  }, [entryGps]);
+  }, [entryGps, mapReady]);
 
   // Exit marker
   useEffect(() => {
@@ -195,7 +197,7 @@ function LeafletMap({
         radius: 11, color: "#dc2626", fillColor: "#ef4444", fillOpacity: 0.95, weight: 3,
       }).bindTooltip("OUT", { permanent: true, direction: "top" }).addTo(map);
     });
-  }, [exitGps]);
+  }, [exitGps, mapReady]);
 
   // Fly to bounds
   useEffect(() => {
@@ -204,7 +206,7 @@ function LeafletMap({
       const bounds = L.default.latLngBounds(fitTo.map((p) => [p.lat, p.lng] as [number, number]));
       map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 16, duration: 1 });
     });
-  }, [fitTo]);
+  }, [fitTo, mapReady]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -215,6 +217,8 @@ type MapEEPhase = "idle" | "entry" | "exit" | "done";
 export default function MapTab() {
   const {
     setMapPlan, setMapEntryPoint, setMapExitPoint, setMapGpsPts,
+    mapPlan: ctxMapPlan, mapGpsPts: ctxMapGpsPts,
+    mapEntryPoint: ctxMapEntryPoint, mapExitPoint: ctxMapExitPoint,
     customTrucks, addCustomTruck, removeCustomTruck,
   } = usePlanContext();
 
@@ -275,6 +279,32 @@ export default function MapTab() {
     import("leaflet/dist/leaflet.css" as string).catch(() => {});
     import("leaflet").then(() => setLeafletReady(true)).catch(() => {});
   }, []);
+
+  // Sync from context on mount — handles plan imported via Export/Import tab
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!ctxMapPlan || !ctxMapGpsPts || ctxMapGpsPts.length < 3) return;
+    const origin = computeGpsOrigin(ctxMapGpsPts);
+    setGpsPts(ctxMapGpsPts);
+    setFitTo(ctxMapGpsPts);
+    setGpsOrigin(origin);
+    setFinalResult(ctxMapPlan);
+    setLiveResult(ctxMapPlan);
+    setSweepScores([]);
+    setSweepResults([]);
+    setSelectedSpot(null);
+    let phase: MapEEPhase = "idle";
+    if (ctxMapEntryPoint) {
+      setEntryGps(localToGps(ctxMapEntryPoint, origin));
+      setLocalEntry(ctxMapEntryPoint);
+      phase = "exit";
+    }
+    if (ctxMapExitPoint) {
+      setExitGps(localToGps(ctxMapExitPoint, origin));
+      phase = "done";
+    }
+    setMapEEPhase(phase);
+  }, []); // Intentionally only on mount
 
   // Active polygon for optimization
   const activePts: GpsPt[] = gpsPts.length >= 3 ? gpsPts : parsedManual;

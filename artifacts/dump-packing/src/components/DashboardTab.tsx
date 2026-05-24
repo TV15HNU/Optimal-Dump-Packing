@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import type { LocalPackResult } from "@/engine/localEngine";
 
 interface SiteSummary {
@@ -284,6 +285,7 @@ function DailyReportModal({ sites, onClose }: { sites: SiteSummary[]; onClose: (
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 export default function DashboardTab() {
+  const { toast } = useToast();
   const [sites, setSites] = useState<SiteSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSite, setSelectedSite] = useState<SiteDetail | null>(null);
@@ -293,7 +295,9 @@ export default function DashboardTab() {
   const [demoActive, setDemoActive] = useState(false);
   const [demoMsg, setDemoMsg] = useState("");
   const [showReport, setShowReport] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const demoRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevSitesDoneRef = useRef<Record<string, number>>({});
 
   const fetchSites = useCallback(async () => {
     try {
@@ -308,12 +312,31 @@ export default function DashboardTab() {
 
   useEffect(() => { fetchSites(); }, [fetchSites]);
 
-  // Reload sites list every 15s while demo is active
+  // Reload sites list every 10s; fire toast when any site reaches 100%
   useEffect(() => {
-    if (!demoActive) return;
-    const iv = setInterval(fetchSites, 15000);
+    const iv = setInterval(async () => {
+      try {
+        const data = await api.sites.list();
+        setSites(data);
+        for (const site of data) {
+          const prev = prevSitesDoneRef.current[site.id] ?? -1;
+          if (
+            site.total_spots > 0 &&
+            site.spots_done >= site.total_spots &&
+            prev < site.total_spots
+          ) {
+            toast({
+              title: "Site Complete! 🎉",
+              description: `${site.name} — all ${site.total_spots} spots filled.`,
+              duration: 6000,
+            });
+          }
+          prevSitesDoneRef.current[site.id] = site.spots_done;
+        }
+      } catch { /* ignore */ }
+    }, 10000);
     return () => clearInterval(iv);
-  }, [demoActive, fetchSites]);
+  }, [fetchSites, toast]);
 
   const openDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -353,6 +376,11 @@ export default function DashboardTab() {
         if (pending.length === 0) {
           clearInterval(demoRef.current!); demoRef.current = null;
           setDemoActive(false); setDemoMsg("All spots filled ✓");
+          toast({
+            title: "Site Complete! 🎉",
+            description: `${prev.name} — all ${prev.total_spots} spots have been filled.`,
+            duration: 6000,
+          });
           return { ...prev, status: "completed" };
         }
         const next = pending[0];
@@ -366,7 +394,7 @@ export default function DashboardTab() {
           progressHistory: [...prev.progressHistory, { spots_done: newDone, total_spots: prev.total_spots, snapshot_at: new Date().toISOString() }],
         };
       });
-    }, 10000);
+    }, 1000);
   }, [selectedSite]);
 
   const stopDemo = useCallback(() => {
@@ -556,19 +584,42 @@ export default function DashboardTab() {
 
               {/* Progress history */}
               <div className="bg-card border border-border rounded p-4">
-                <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-3">Progress Timeline</div>
-                <HistorySparkline history={selectedSite.progressHistory ?? []} />
-                {(selectedSite.progressHistory ?? []).length > 0 && (
-                  <div className="mt-3 text-[11px] font-mono text-muted-foreground">
-                    {selectedSite.progressHistory.slice(-4).reverse().map((h, i) => (
-                      <div key={i} className="flex justify-between border-t border-border pt-1 mt-1">
-                        <span>{new Date(h.snapshot_at).toLocaleTimeString()}</span>
-                        <span className="text-primary">{h.spots_done}/{h.total_spots} spots</span>
-                        <span className="text-muted-foreground">
-                          {h.total_spots > 0 ? Math.round((h.spots_done / h.total_spots) * 100) : 0}%
-                        </span>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-xs font-semibold text-primary uppercase tracking-wider">Progress Timeline</div>
+                  <div className="flex gap-1">
+                    <button onClick={() => setShowHistory(false)}
+                      className={`px-2 py-0.5 text-[10px] rounded font-semibold transition-colors ${!showHistory ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                      Chart
+                    </button>
+                    <button onClick={() => setShowHistory(true)}
+                      className={`px-2 py-0.5 text-[10px] rounded font-semibold transition-colors ${showHistory ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                      History
+                    </button>
+                  </div>
+                </div>
+                {!showHistory ? (
+                  <HistorySparkline history={selectedSite.progressHistory ?? []} />
+                ) : (
+                  <div className="max-h-52 overflow-y-auto">
+                    {(selectedSite.progressHistory ?? []).length === 0 ? (
+                      <div className="text-xs text-muted-foreground text-center py-6">No history yet — start demo or fill spots</div>
+                    ) : (
+                      <div className="text-[11px] font-mono text-muted-foreground space-y-0.5">
+                        {[...(selectedSite.progressHistory ?? [])].reverse().map((h, i) => (
+                          <div key={i} className="flex justify-between items-center border-b border-border/50 py-1">
+                            <span className="text-muted-foreground/70">
+                              {new Date(h.snapshot_at).toLocaleDateString([], { month: "2-digit", day: "2-digit" })}
+                              {" "}
+                              {new Date(h.snapshot_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                            </span>
+                            <span className="text-primary font-semibold">{h.spots_done}/{h.total_spots} spots</span>
+                            <span className={`font-bold ${h.total_spots > 0 && Math.round((h.spots_done / h.total_spots) * 100) === 100 ? "text-green-400" : "text-amber-400"}`}>
+                              {h.total_spots > 0 ? Math.round((h.spots_done / h.total_spots) * 100) : 0}%
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>

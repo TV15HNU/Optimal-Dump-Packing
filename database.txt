@@ -1,0 +1,113 @@
+OPTIMAL DUMP PACKING — DATABASE DOCUMENTATION
+==============================================
+PostgreSQL (Replit-managed). All tables use UTC timestamps.
+DATABASE_URL env var connects the API server.
+
+──────────────────────────────────────────────────────────────────────────────
+TABLE: custom_trucks
+──────────────────────────────────────────────────────────────────────────────
+Purpose : Stores user-defined truck profiles (supplements 4 built-in presets).
+Owner   : Supervisor creates/deletes. Used in both Planner and Map/GPS tabs.
+
+Column          Type        Constraints   Description
+-----------     --------    ----------    -------------------------------------------
+id              TEXT        PRIMARY KEY   Client-generated ID, e.g. "custom-1714000000000"
+name            TEXT        NOT NULL      Display name, e.g. "Custom Haul 320T"
+width           NUMERIC     NOT NULL      Truck width in metres (affects inset buffer)
+length          NUMERIC     NOT NULL      Truck length in metres
+turning_radius  NUMERIC     NOT NULL      Minimum turning radius in metres (inset distance)
+spacing_x       NUMERIC     NOT NULL      Horizontal hex-grid spacing in metres
+spacing_y       NUMERIC     NOT NULL      Vertical hex-grid spacing in metres
+payload_tonnes  NUMERIC     NOT NULL      Payload capacity in metric tonnes
+created_at      TIMESTAMPTZ DEFAULT now() Row creation time
+updated_at      TIMESTAMPTZ DEFAULT now() Last modification time
+
+Routes : GET  /api/v1/trucks         — list all (built-in + custom)
+         POST /api/v1/trucks         — create
+         DELETE /api/v1/trucks/:id   — remove (custom only)
+
+──────────────────────────────────────────────────────────────────────────────
+TABLE: sites
+──────────────────────────────────────────────────────────────────────────────
+Purpose : One row per saved dump site plan. Persisted by supervisor from
+          Export/Import or Dashboard. Queried by Dashboard and Driver Work.
+
+Column       Type     Constraints   Description
+---------    ------   ----------    -----------------------------------------------
+id           TEXT     PRIMARY KEY   Client-generated, e.g. "site-1714000000000"
+name         TEXT     NOT NULL      Human-readable site name, e.g. "Pit A – Bench 3"
+status       TEXT     NOT NULL      'running' | 'completed'  (default: 'running')
+truck_id     TEXT     NOT NULL      References the truck used (preset or custom ID)
+truck_name   TEXT     NOT NULL      Display name of the truck for denormalised reads
+polygon      JSONB    NOT NULL      Array of {x,y} local-coordinate polygon vertices (metres)
+gps_polygon  JSONB               Array of {lat,lng} GPS polygon vertices (nullable)
+plan         JSONB    NOT NULL      Full LocalPackResult JSON — spots, lanes, metrics,
+                                   bestRotation, entryPoint, exitPoint, insetPolygon
+total_spots  INTEGER  DEFAULT 0    Spot count (derived from plan.spots.length on insert)
+spots_done   INTEGER  DEFAULT 0    Denormalised counter updated on each progress call
+created_at   TIMESTAMPTZ           Row creation time
+updated_at   TIMESTAMPTZ           Updated whenever spots_done changes
+
+Routes : GET    /api/v1/sites           — list all (summary columns, no plan blob)
+         GET    /api/v1/sites/:id       — full detail including spotProgress + history
+         POST   /api/v1/sites           — create / upsert (body: id, name, truckId,
+                                          truckName, polygon, gpsPolygon, plan)
+         DELETE /api/v1/sites/:id       — delete site + cascade progress + snapshots
+
+──────────────────────────────────────────────────────────────────────────────
+TABLE: spot_progress
+──────────────────────────────────────────────────────────────────────────────
+Purpose : Tracks fill status for every individual spot in every site.
+          One row per (site, spot). Written by Demo mode and Driver Work tab.
+
+Column      Type        Constraints                   Description
+--------    --------    ----------                    ---------------------------------
+id          SERIAL      PRIMARY KEY                   Auto-increment row id
+site_id     TEXT        NOT NULL, FK→sites(id)        Parent site (CASCADE DELETE)
+spot_id     INTEGER     NOT NULL                      spot.id from LocalPackResult.spots
+done        BOOLEAN     NOT NULL, DEFAULT false        Whether the spot has been filled
+done_at     TIMESTAMPTZ                               Timestamp when marked done
+driver_id   TEXT                                      Clerk user ID of the driver who filled it
+            UNIQUE (site_id, spot_id)                 Ensures one row per spot per site
+
+Routes : PATCH /api/v1/sites/:id/progress
+         Body : { spotId, done, driverId }
+         Also auto-snapshots site_progress_snapshots when spots_done changes.
+
+──────────────────────────────────────────────────────────────────────────────
+TABLE: site_progress_snapshots
+──────────────────────────────────────────────────────────────────────────────
+Purpose : Time-series history of spot-fill progress for a site.
+          A new row is inserted each time spot progress is updated.
+          Used by Dashboard Progress Timeline and History tab sparklines.
+
+Column        Type        Constraints            Description
+-----------   --------    ----------             ----------------------------------------
+id            SERIAL      PRIMARY KEY            Auto-increment row id
+site_id       TEXT        NOT NULL, FK→sites(id) Parent site (CASCADE DELETE)
+spots_done    INTEGER     NOT NULL               Total spots done at this point in time
+total_spots   INTEGER     NOT NULL               Total spots in the site at snapshot time
+snapshot_at   TIMESTAMPTZ DEFAULT now()          Time of the snapshot
+
+Read-only — never updated, only inserted. Used to build sparklines and history
+lists in the Dashboard. Rendered in the Progress Timeline section of the
+site detail panel.
+
+──────────────────────────────────────────────────────────────────────────────
+RELATIONSHIPS
+──────────────────────────────────────────────────────────────────────────────
+sites (1) ──< spot_progress (N)          via site_id → CASCADE DELETE
+sites (1) ──< site_progress_snapshots(N) via site_id → CASCADE DELETE
+custom_trucks has no FK references (standalone)
+
+──────────────────────────────────────────────────────────────────────────────
+NOTES
+──────────────────────────────────────────────────────────────────────────────
+- No ORM migrations — schema managed via raw DDL in api-server startup or setup.
+- Production schema changes are applied by Replit's Publish diff tool.
+- The `plan` JSONB column stores the full packing result; typical size 10–200 KB
+  depending on spot count. Consider pagination for very large polygons.
+- `polygon` stores local-coordinate geometry (metres from centroid) for
+  deterministic rendering without GPS dependency.
+- `gps_polygon` is nullable; only present when the plan was generated in Map/GPS
+  tab or imported from a JSON that included GPS coordinates.
