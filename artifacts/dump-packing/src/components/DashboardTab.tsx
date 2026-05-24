@@ -376,12 +376,13 @@ export default function DashboardTab() {
         if (pending.length === 0) {
           clearInterval(demoRef.current!); demoRef.current = null;
           setDemoActive(false); setDemoMsg("All spots filled ✓");
-          toast({
-            title: "Site Complete! 🎉",
-            description: `${prev.name} — all ${prev.total_spots} spots have been filled.`,
-            duration: 6000,
-          });
-          return { ...prev, status: "completed" };
+          const siteId = prev.id, siteName = prev.name, total = prev.total_spots;
+          setTimeout(() => {
+            toast({ title: "Site Complete! 🎉", description: `${siteName} — all ${total} spots filled.`, duration: 6000 });
+            api.sites.updateStatus(siteId, "completed").catch(() => {});
+            fetchSites();
+          }, 200);
+          return { ...prev, status: "completed", spots_done: prev.total_spots };
         }
         const next = pending[0];
         api.sites.updateProgress(prev.id, next.id, true, "demo-driver").catch(() => {});
@@ -395,7 +396,7 @@ export default function DashboardTab() {
         };
       });
     }, 1000);
-  }, [selectedSite]);
+  }, [selectedSite, fetchSites, toast]);
 
   const stopDemo = useCallback(() => {
     if (demoRef.current) { clearInterval(demoRef.current); demoRef.current = null; }
@@ -540,8 +541,8 @@ export default function DashboardTab() {
                   <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-0.5">Simulation Demo</div>
                   <div className="text-[11px] text-muted-foreground">
                     {demoActive
-                      ? "Filling one spot every 10 s — watch canvas & sparkline update in real time"
-                      : "Auto-fill spots every 10s to demonstrate live progress tracking"}
+                      ? "Filling one spot every second — watch canvas & sparkline update in real time"
+                      : "Auto-fill spots every second to demonstrate live progress tracking"}
                   </div>
                   {demoMsg && <div className={`text-[11px] mt-1 ${demoMsg.includes("✓") ? "text-green-400" : demoMsg.includes("Select") ? "text-amber-400" : "text-cyan-400"}`}>{demoMsg}</div>}
                 </div>

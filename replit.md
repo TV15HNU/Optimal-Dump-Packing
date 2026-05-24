@@ -70,11 +70,22 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
 
 ## Best Version
 
-- Commit: `aef6f06260e217b8787522e4159d22a104c20066`
-- Label: **BEST VERSION** — full feature set with auth + DB: Clerk auth (email/password + Google), role-based login (Supervisor/Driver selector on landing), Dashboard with high-res site canvas, auto-demo spot-fill, daily report modal, custom trucks persisted to PostgreSQL with duplicate-name override modal, Map/GPS 0–59° sweep (1° step), Export/Import with post-import save-to-dashboard, entry/exit GPS coord inputs, Fill Edge Gaps in Map tab.
+- Commit: `33dc05dc77278a68440d1aec23266c43f636465d` (checkpoint label: current session end)
+- Label: **BEST VERSION** — complete feature set:
+  - Clerk auth (email/password + Google), role-based login (Supervisor / Driver)
+  - PostgreSQL: 4 tables (custom_trucks, sites, spot_progress, site_progress_snapshots); fully documented in `database.txt`
+  - Dashboard: 1-second demo fill, real-time 10-second polling alerts, toast on 100% completion, Chart/History toggle (full scrollable timeline), completed status persisted to DB + sidebar refreshes automatically
+  - Driver Work tab: live site list, spot canvas, mark-done per spot
+  - Supervisor Batch Excel tab: template download (CAT 793), upload + parse multi-sheet Excel, 60° sweep + gap-fill per site, checkboxes to select which sites to import to Dashboard, export results Excel with Gaps Filled column, correct entry/exit GPS → local coord conversion using polygon centroid origin
+  - Map/GPS: mapReady race-condition fix, context sync on import
+  - 20 MB body-parser limit (fixes 413 on large plan saves)
+  - `database.txt` at project root — all 4 tables with columns, types, constraints, routes, and relationships
 - To restore: roll back to this checkpoint via Replit history.
 
 ## Previous Best Versions
+
+- Commit: `aef6f06260e217b8787522e4159d22a104c20066`
+- Label: Full feature set with auth + DB: Clerk auth, role-based login, Dashboard, auto-demo, daily report modal, custom trucks in PostgreSQL, Map/GPS 0–59° sweep, Export/Import with post-import save, entry/exit GPS inputs, Fill Edge Gaps.
 
 - Commit: `85e01517e4a17508378d8dd0fb190eba3c258e1b`
 - Label: Working planner with identity transform fix, rotation sweep, custom truck form, simulation, Map/GPS world zoom, iteration thumbnails, export JSON.
