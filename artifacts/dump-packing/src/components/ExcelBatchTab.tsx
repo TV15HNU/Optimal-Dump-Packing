@@ -80,7 +80,8 @@ function parseExcelFile(file: File): Promise<ParsedSite[]> {
           let inVertices = false;
 
           for (const row of rows) {
-            const label = String(row[0] ?? "").trim().toLowerCase();
+            // Strip trailing colon so "Entry:" and "Entry" both work
+            const label = String(row[0] ?? "").trim().toLowerCase().replace(/:$/, "");
             if (label === "site name" || label === "name") {
               siteName = String(row[1] ?? sheetName).trim() || sheetName;
             } else if (label === "truck") {
