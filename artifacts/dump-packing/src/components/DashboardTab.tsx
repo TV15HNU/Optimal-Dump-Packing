@@ -351,14 +351,17 @@ export default function DashboardTab() {
   }, []);
 
   const markStatus = useCallback(async (id: string, status: "running" | "completed") => {
-    // Optimistic update: immediately reflect new status in the detail view
+    // Optimistic update: immediately reflect new status in BOTH selectedSite AND sites list
+    // (sites list drives the top-left Running/Completed/Spots Done counters)
+    setSites((prev) => prev.map((s) => {
+      if (s.id !== id) return s;
+      if (status === "running") return { ...s, status: "running", spots_done: 0 };
+      return { ...s, status };
+    }));
     if (selectedSite?.id === id) {
       setSelectedSite((prev) => {
         if (!prev) return prev;
-        if (status === "running") {
-          // Reopen — clear all progress locally so demo starts clean
-          return { ...prev, status: "running", spots_done: 0, spotProgress: [] };
-        }
+        if (status === "running") return { ...prev, status: "running", spots_done: 0, spotProgress: [] };
         return { ...prev, status };
       });
     }
@@ -537,6 +540,14 @@ export default function DashboardTab() {
                         Reopen
                       </button>
                     )}
+                    <button
+                      onClick={async () => {
+                        if (selectedSite.status !== "running") await markStatus(selectedSite.id, "running");
+                        toast({ title: "Assigned to Drivers", description: `${selectedSite.name} is now visible in the Driver Work tab.`, duration: 4000 });
+                      }}
+                      className="text-[11px] px-2 py-1 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded hover:bg-cyan-500/20">
+                      Assign to Driver
+                    </button>
                     <button onClick={() => setConfirmDelete(selectedSite.id)}
                       className="text-[11px] px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/30 rounded hover:bg-red-500/20">
                       Delete
