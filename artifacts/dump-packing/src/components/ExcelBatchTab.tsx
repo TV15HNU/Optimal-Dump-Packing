@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
-import { runAtAngle, fillGaps, DEFAULT_TRUCKS, type TruckConfig, type LocalPackResult, type SpotLocal } from "@/engine/localEngine";
+import { runAtAngle, fillGaps, projectToNearestEdge, DEFAULT_TRUCKS, type TruckConfig, type LocalPackResult, type SpotLocal } from "@/engine/localEngine";
 import { api } from "@/lib/api";
 
 const R_EARTH = 6371000;
@@ -232,13 +232,15 @@ export default function ExcelBatchTab() {
         };
       }
 
-      // Entry / exit — convert using the SAME polygon origin (not single-point centroid)
+      // Entry / exit — convert GPS → local, then snap to nearest polygon edge
       let updatedResult = { ...best };
       if (site.entryLat !== undefined && site.entryLng !== undefined) {
-        updatedResult = { ...updatedResult, entryPoint: gpsPointToLocal({ lat: site.entryLat, lng: site.entryLng }, origin) };
+        const localPt = gpsPointToLocal({ lat: site.entryLat, lng: site.entryLng }, origin);
+        updatedResult = { ...updatedResult, entryPoint: projectToNearestEdge(localPt, localPts) };
       }
       if (site.exitLat !== undefined && site.exitLng !== undefined) {
-        updatedResult = { ...updatedResult, exitPoint: gpsPointToLocal({ lat: site.exitLat, lng: site.exitLng }, origin) };
+        const localPt = gpsPointToLocal({ lat: site.exitLat, lng: site.exitLng }, origin);
+        updatedResult = { ...updatedResult, exitPoint: projectToNearestEdge(localPt, localPts) };
       }
 
       // Back-project spots to GPS

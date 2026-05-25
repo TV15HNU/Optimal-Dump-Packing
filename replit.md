@@ -70,13 +70,14 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
 
 ## Best Version
 
-- Commit: `33dc05dc77278a68440d1aec23266c43f636465d` (checkpoint label: current session end)
+- Commit: `fe777fb7acc357d7a8b9ec35caf61b5cf87643f7` (checkpoint label: current session end)
 - Label: **BEST VERSION** — complete feature set:
   - Clerk auth (email/password + Google), role-based login (Supervisor / Driver)
   - PostgreSQL: 4 tables (custom_trucks, sites, spot_progress, site_progress_snapshots); fully documented in `database.txt`
   - Dashboard: 1-second demo fill, real-time 10-second polling alerts, toast on 100% completion, Chart/History toggle (full scrollable timeline), completed status persisted to DB + sidebar refreshes automatically
   - Driver Work tab: live site list, spot canvas, mark-done per spot
-  - Supervisor Batch Excel tab: template download (CAT 793), upload + parse multi-sheet Excel, 60° sweep + gap-fill per site, checkboxes to select which sites to import to Dashboard, export results Excel with Gaps Filled column, correct entry/exit GPS → local coord conversion using polygon centroid origin
+  - Supervisor Batch Excel tab: template download (CAT 793), upload + parse multi-sheet Excel, 60° sweep + gap-fill per site, checkboxes to select which sites to import to Dashboard, export results Excel with Gaps Filled column, correct entry/exit GPS → local → projectToNearestEdge (always on polygon edge)
+  - Excel label parsing: strips trailing colons so "Entry:", "Site Name:", "Truck:", "Vertices:" all parse correctly
   - Map/GPS: mapReady race-condition fix, context sync on import
   - 20 MB body-parser limit (fixes 413 on large plan saves)
   - `database.txt` at project root — all 4 tables with columns, types, constraints, routes, and relationships
