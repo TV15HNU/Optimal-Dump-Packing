@@ -351,6 +351,17 @@ export default function DashboardTab() {
   }, []);
 
   const markStatus = useCallback(async (id: string, status: "running" | "completed") => {
+    // Optimistic update: immediately reflect new status in the detail view
+    if (selectedSite?.id === id) {
+      setSelectedSite((prev) => {
+        if (!prev) return prev;
+        if (status === "running") {
+          // Reopen — clear all progress locally so demo starts clean
+          return { ...prev, status: "running", spots_done: 0, spotProgress: [] };
+        }
+        return { ...prev, status };
+      });
+    }
     await api.sites.updateStatus(id, status);
     fetchSites();
     if (selectedSite?.id === id) openDetail(id);

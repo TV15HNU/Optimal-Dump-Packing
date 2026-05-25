@@ -68,7 +68,13 @@ router.patch("/v1/sites/:id/status", requireAuth, async (req: any, res: any) => 
   const { status } = req.body;
   if (!["running", "completed"].includes(status)) { res.status(400).json({ error: "Invalid status" }); return; }
   try {
-    await pool.query("UPDATE sites SET status=$1, updated_at=NOW() WHERE id=$2", [status, req.params.id]);
+    if (status === "running") {
+      // Reopen: clear all spot progress so demo/drivers can start fresh
+      await pool.query("DELETE FROM spot_progress WHERE site_id=$1", [req.params.id]);
+      await pool.query("UPDATE sites SET status='running', spots_done=0, updated_at=NOW() WHERE id=$2", [req.params.id]);
+    } else {
+      await pool.query("UPDATE sites SET status=$1, updated_at=NOW() WHERE id=$2", [status, req.params.id]);
+    }
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "Failed to update site status");
