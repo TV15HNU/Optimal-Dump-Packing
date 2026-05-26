@@ -326,23 +326,25 @@ export default function DriverWorkTab() {
                         <div className="text-[10px] text-muted-foreground uppercase mb-1">Sequence</div>
                         <div className="font-mono font-bold text-sm">#{currentSpot.globalSequence + 1}</div>
                       </div>
-                      {currentGps && (
-                        <>
-                          <div className="bg-secondary/40 rounded p-2.5">
-                            <div className="text-[10px] text-muted-foreground uppercase mb-1">Latitude</div>
-                            <div className="font-mono font-bold text-sm text-cyan-400">
-                              {currentGps.lat.toFixed(6)}°
-                            </div>
-                          </div>
-                          <div className="bg-secondary/40 rounded p-2.5">
-                            <div className="text-[10px] text-muted-foreground uppercase mb-1">Longitude</div>
-                            <div className="font-mono font-bold text-sm text-cyan-400">
-                              {currentGps.lng.toFixed(6)}°
-                            </div>
-                          </div>
-                        </>
-                      )}
+                      <div className="bg-secondary/40 rounded p-2.5">
+                        <div className="text-[10px] text-muted-foreground uppercase mb-1">Latitude</div>
+                        <div className={`font-mono font-bold text-sm ${currentGps ? "text-cyan-400" : "text-muted-foreground"}`}>
+                          {currentGps ? `${currentGps.lat.toFixed(6)}°` : "N/A"}
+                        </div>
+                      </div>
+                      <div className="bg-secondary/40 rounded p-2.5">
+                        <div className="text-[10px] text-muted-foreground uppercase mb-1">Longitude</div>
+                        <div className={`font-mono font-bold text-sm ${currentGps ? "text-cyan-400" : "text-muted-foreground"}`}>
+                          {currentGps ? `${currentGps.lng.toFixed(6)}°` : "N/A"}
+                        </div>
+                      </div>
                     </div>
+                    {!gpsOrigin && (
+                      <div className="text-[10px] text-amber-400/70 bg-amber-500/5 border border-amber-500/20 rounded px-2.5 py-1.5 mb-4">
+                        GPS polygon not recorded for this site — coordinates unavailable.
+                        Contact your supervisor to re-import with GPS vertices.
+                      </div>
+                    )}
 
                     <button
                       onClick={markDone}
