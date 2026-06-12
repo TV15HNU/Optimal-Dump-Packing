@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
 import { useUser } from "@clerk/react";
+import { sortSpotsByDispatch } from "@/engine/localEngine";
 import type { LocalPackResult } from "@/engine/localEngine";
 
 const R_EARTH = 6371000;
@@ -185,9 +186,18 @@ export default function DriverWorkTab() {
   }, [selectedSite, driverId]);
 
   // Derived data
-  const spots = selectedSite?.plan?.spots ?? [];
+  const rawSpots = selectedSite?.plan?.spots ?? [];
   const spotProgress = selectedSite?.spotProgress ?? [];
   const doneSet = new Set(spotProgress.filter((s) => s.done).map((s) => s.spot_id));
+
+  // Sort spots farthest-from-entry first (matches SimulationTab dispatch order).
+  // When no entry point is set, fall back to globalSequence order.
+  const spots = useMemo(() => {
+    const entryPt = selectedSite?.plan?.entryPoint ?? null;
+    if (entryPt) return sortSpotsByDispatch(rawSpots, entryPt);
+    return [...rawSpots].sort((a, b) => a.globalSequence - b.globalSequence);
+  }, [rawSpots, selectedSite?.plan?.entryPoint]);
+
   const pendingSpots = spots.filter((s) => !doneSet.has(s.id));
   const doneSpots = spots.filter((s) => doneSet.has(s.id));
   const currentSpot = pendingSpots[0] ?? null;
