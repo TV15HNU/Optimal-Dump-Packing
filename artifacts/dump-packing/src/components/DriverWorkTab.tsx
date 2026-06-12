@@ -146,21 +146,16 @@ export default function DriverWorkTab() {
     catch { setSelectedSite(null); } finally { setDetailLoading(false); }
   }, []);
 
-  const markDone = useCallback(async () => {
+  const markDone = useCallback(async (spotId: number) => {
     if (!selectedSite || marking) return;
-    const spots = selectedSite.plan?.spots ?? [];
-    const doneSet = new Set(selectedSite.spotProgress.filter((s) => s.done).map((s) => s.spot_id));
-    const currentSpot = spots.find((s) => !doneSet.has(s.id));
-    if (!currentSpot) return;
-
     setMarking(true);
     try {
-      await api.sites.updateProgress(selectedSite.id, currentSpot.id, true, driverId);
+      await api.sites.updateProgress(selectedSite.id, spotId, true, driverId);
       setSelectedSite((prev) => {
         if (!prev) return prev;
         const newProg = [
-          ...prev.spotProgress.filter((sp) => sp.spot_id !== currentSpot.id),
-          { spot_id: currentSpot.id, done: true, done_at: new Date().toISOString(), driver_id: driverId },
+          ...prev.spotProgress.filter((sp) => sp.spot_id !== spotId),
+          { spot_id: spotId, done: true, done_at: new Date().toISOString(), driver_id: driverId },
         ];
         const doneCount = newProg.filter((sp) => sp.done).length;
         return { ...prev, spotProgress: newProg, spots_done: doneCount };
@@ -357,8 +352,8 @@ export default function DriverWorkTab() {
                     )}
 
                     <button
-                      onClick={markDone}
-                      disabled={marking}
+                      onClick={() => currentSpot && markDone(currentSpot.id)}
+                      disabled={marking || !currentSpot}
                       className="w-full py-3 bg-green-500/15 border border-green-500/40 text-green-400 font-bold text-sm rounded hover:bg-green-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                       {marking ? (
                         <><span className="animate-pulse">Marking…</span></>

@@ -3,6 +3,18 @@ import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import type { LocalPackResult } from "@/engine/localEngine";
+import type { SpotLocal } from "@/engine/localEngine";
+
+function pickNextFarthestFirst(spots: SpotLocal[], doneIds: Set<number>, entryPt: { x: number; y: number } | null): SpotLocal | null {
+  const pending = spots.filter((s) => !doneIds.has(s.id));
+  if (pending.length === 0) return null;
+  if (!entryPt) return [...pending].sort((a, b) => a.globalSequence - b.globalSequence)[0];
+  return pending.reduce((best, s) => {
+    const dBest = Math.hypot(best.x - entryPt.x, best.y - entryPt.y);
+    const dS    = Math.hypot(s.x   - entryPt.x, s.y   - entryPt.y);
+    return dS > dBest ? s : best;
+  });
+}
 
 interface SiteSummary {
   id: string;
@@ -377,7 +389,7 @@ export default function DashboardTab() {
     fetchSites();
   }, [fetchSites, selectedSite]);
 
-  // ── Demo mode: tick one spot every 10s ──
+  // ── Demo mode: fill one spot per second, farthest-first ──
   const startDemo = useCallback(() => {
     if (!selectedSite) { setDemoMsg("Select a site first"); return; }
     setDemoActive(true);
@@ -386,8 +398,11 @@ export default function DashboardTab() {
     demoRef.current = setInterval(async () => {
       setSelectedSite((prev) => {
         if (!prev) return prev;
-        const pending = (prev.plan.spots ?? []).filter((s) => !prev.spotProgress.find((sp) => sp.spot_id === s.id && sp.done));
-        if (pending.length === 0) {
+        const allSpots = prev.plan.spots ?? [];
+        const doneIds = new Set(prev.spotProgress.filter((sp) => sp.done).map((sp) => sp.spot_id));
+        const entryPt = (prev.plan.entryPoint as { x: number; y: number } | null | undefined) ?? null;
+        const next = pickNextFarthestFirst(allSpots, doneIds, entryPt);
+        if (!next) {
           clearInterval(demoRef.current!); demoRef.current = null;
           setDemoActive(false); setDemoMsg("All spots filled ✓");
           const siteId = prev.id, siteName = prev.name, total = prev.total_spots;
@@ -398,7 +413,6 @@ export default function DashboardTab() {
           }, 200);
           return { ...prev, status: "completed", spots_done: prev.total_spots };
         }
-        const next = pending[0];
         api.sites.updateProgress(prev.id, next.id, true, "demo-driver").catch(() => {});
         const newProgress = [
           ...prev.spotProgress.filter((sp) => sp.spot_id !== next.id),
@@ -419,6 +433,23 @@ export default function DashboardTab() {
   }, [selectedSite, openDetail]);
 
   useEffect(() => () => { if (demoRef.current) clearInterval(demoRef.current); }, []);
+
+  // Auto-refresh selected site detail every 10s so driver progress shows up without manual click
+  const selectedSiteIdRef = useRef<string | null>(null);
+  useEffect(() => { selectedSiteIdRef.current = selectedSite?.id ?? null; }, [selectedSite?.id]);
+  useEffect(() => {
+    const iv = setInterval(async () => {
+      const id = selectedSiteIdRef.current;
+      if (!id || demoActive) return;
+      try {
+        const fresh = await api.sites.get(id);
+        setSelectedSite(fresh);
+        // Mirror spots_done into the summary list so the left sidebar stays in sync
+        setSites((prev) => prev.map((s) => s.id === id ? { ...s, spots_done: fresh.spots_done, status: fresh.status } : s));
+      } catch { /* ignore */ }
+    }, 10000);
+    return () => clearInterval(iv);
+  }, [demoActive]);
 
   const filtered = sites.filter((s) => filter === "all" || s.status === filter);
   const running = sites.filter((s) => s.status === "running").length;

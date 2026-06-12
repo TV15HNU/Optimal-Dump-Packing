@@ -29,7 +29,7 @@ function buildDispatchOrder(plan: LocalPackResult, entryPt: Pt | null): SpotLoca
 }
 
 export default function SimulationTab() {
-  const { currentPlan, entryPoint, exitPoint, customTrucks, addCustomTruck, removeCustomTruck } = usePlanContext();
+  const { currentPlan, entryPoint, exitPoint, selectedTruck, customTrucks, addCustomTruck, removeCustomTruck } = usePlanContext();
 
   const [useDrawnPlan, setUseDrawnPlan]     = useState(false);
   const [plan, setPlan]                     = useState<LocalPackResult>(() => runLocalEngine(DEFAULT_POLY, DEFAULT_TRUCKS[0], 5));
@@ -120,8 +120,10 @@ export default function SimulationTab() {
     stop();
     setUseDrawnPlan(true);
     setPlan(currentPlan);
+    // Sync the truck that was used in Planner
+    if (selectedTruck) setSelectedTruckId(selectedTruck.id);
     setCompletedIds(new Set()); setActiveId(null); setCurrentStep(0);
-  }, [currentPlan, stop]);
+  }, [currentPlan, stop, selectedTruck]);
 
   const handleAddCustomTruck = useCallback(() => {
     if (!customForm.name.trim()) { setCustomError("Name is required"); return; }
