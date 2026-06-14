@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ehOt75mE6Tx7qgmr7SSrr"
+uri = "file://.local/outputs/best-model.pptx"
+type = "slides"
+title = "best model.pptx"
+
+[[outputs]]
+id = "5qJS_0FO2LeIZl9nchYrX"
+uri = "file://PITCH_GUIDE.md"
+type = "text"
+title = "Pitch Guide — Demo Script & Talking Points"
