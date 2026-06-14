@@ -1,0 +1,114 @@
+[
+  {
+    "id": "a1b2c3d4-0001-4e5f-8a9b-c0d1e2f30001",
+    "position": 1,
+    "filepath": "src/pages/slides/Slide01Title.tsx",
+    "title": "Title — Optimal Dump Packing",
+    "description": "Title slide with team name, three teammates, and problem statement",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0002-4e5f-8a9b-c0d1e2f30002",
+    "position": 2,
+    "filepath": "src/pages/slides/Slide02Problem.tsx",
+    "title": "The Problem",
+    "description": "Four failure modes of current AHS systems with supporting stats",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0003-4e5f-8a9b-c0d1e2f30003",
+    "position": 3,
+    "filepath": "src/pages/slides/Slide03Scale.tsx",
+    "title": "Scale of Impact",
+    "description": "$4.7M per dump zone per year lost value — three contributing factors",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0004-4e5f-8a9b-c0d1e2f30004",
+    "position": 4,
+    "filepath": "src/pages/slides/Slide04Solution.tsx",
+    "title": "Our Solution",
+    "description": "Five-algorithm pipeline overview: inset, hex packing, rotation sweep, gap fill, farthest-first",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0005-4e5f-8a9b-c0d1e2f30005",
+    "position": 5,
+    "filepath": "src/pages/slides/Slide05AlgoFlow.tsx",
+    "title": "Algorithm Pipeline",
+    "description": "Step-by-step flow diagram from raw polygon to optimised dispatch plan",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0006-4e5f-8a9b-c0d1e2f30006",
+    "position": 6,
+    "filepath": "src/pages/slides/Slide06Numbers.tsx",
+    "title": "Performance Numbers",
+    "description": "2.4x density, +35% peak gain, <200ms, 90% utilisation — benchmark table",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0007-4e5f-8a9b-c0d1e2f30007",
+    "position": 7,
+    "filepath": "src/pages/slides/Slide07Architecture.tsx",
+    "title": "System Architecture",
+    "description": "Browser → API → PostgreSQL stack with key design decisions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0008-4e5f-8a9b-c0d1e2f30008",
+    "position": 8,
+    "filepath": "src/pages/slides/Slide08Features.tsx",
+    "title": "Platform Features",
+    "description": "Supervisor Planner, Dashboard, and Driver Work Tab feature breakdown",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0009-4e5f-8a9b-c0d1e2f30009",
+    "position": 9,
+    "filepath": "src/pages/slides/Slide09Dispatch.tsx",
+    "title": "Farthest-First Dispatch",
+    "description": "Before/after comparison showing how dispatch order eliminates traffic deadlock",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0010-4e5f-8a9b-c0d1e2f30010",
+    "position": 10,
+    "filepath": "src/pages/slides/Slide10Demo.tsx",
+    "title": "Live Demo",
+    "description": "Seven-step walkthrough of what judges will see during the live demo",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0011-4e5f-8a9b-c0d1e2f30011",
+    "position": 11,
+    "filepath": "src/pages/slides/Slide11Impact.tsx",
+    "title": "Business Impact",
+    "description": "$4.7M annual saving per zone breakdown, $47M at 10-zone mine, TAM $2.5B",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0012-4e5f-8a9b-c0d1e2f30012",
+    "position": 12,
+    "filepath": "src/pages/slides/Slide12Comparison.tsx",
+    "title": "Competitive Gap",
+    "description": "Head-to-head comparison table: fixed-grid AHS vs Optimal Dump Packing",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0013-4e5f-8a9b-c0d1e2f30013",
+    "position": 13,
+    "filepath": "src/pages/slides/Slide13TechStack.tsx",
+    "title": "Tech Stack",
+    "description": "Frontend, backend, and key engineering decisions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0014-4e5f-8a9b-c0d1e2f30014",
+    "position": 14,
+    "filepath": "src/pages/slides/Slide14ThankYou.tsx",
+    "title": "Thank You",
+    "description": "Thank you slide with Q&A open prompt and team name",
+    "speakerNotes": ""
+  }
+]
