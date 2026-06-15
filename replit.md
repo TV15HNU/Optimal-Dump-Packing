@@ -70,8 +70,8 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
 
 ## Best Version
 
-- Commit: `fe777fb7acc357d7a8b9ec35caf61b5cf87643f7` (checkpoint label: current session end)
-- Label: **BEST VERSION** — complete feature set:
+- Commit: `fcfa3f2759abeab8eec49e21c13e6a301eb6425f` (checkpoint label: pitch deck + pitch guide)
+- Label: **BEST VERSION** — complete feature set + pitch deck + bug fix:
   - Clerk auth (email/password + Google), role-based login (Supervisor / Driver)
   - PostgreSQL: 4 tables (custom_trucks, sites, spot_progress, site_progress_snapshots); fully documented in `database.txt`
   - Dashboard: 1-second demo fill, real-time 10-second polling alerts, toast on 100% completion, Chart/History toggle (full scrollable timeline), completed status persisted to DB + sidebar refreshes automatically
@@ -81,6 +81,9 @@ _Industrial planning and simulation platform for autonomous mining haul trucks �
   - Map/GPS: mapReady race-condition fix, context sync on import
   - 20 MB body-parser limit (fixes 413 on large plan saves)
   - `database.txt` at project root — all 4 tables with columns, types, constraints, routes, and relationships
+  - 14-slide hackathon pitch deck at `/pitch-deck/` — dark industrial theme, amber accents
+  - `PITCH_GUIDE.md` — tab-by-tab demo script + verbal talking points
+  - Custom truck form: spacingX/spacingY now auto-derived from width/length using `max(width×1.5, length)` — fixes spots packing too tightly or too loosely for non-preset trucks
 - To restore: roll back to this checkpoint via Replit history.
 
 ## Previous Best Versions

@@ -383,16 +383,34 @@ export default function PlannerTab() {
                   ["width", "Body Width (m)", "number"],
                   ["length", "Body Length (m)", "number"],
                   ["turningRadius", "Turning Radius (m)", "number"],
-                  ["spacingX", "Spacing X (m)", "number"],
-                  ["spacingY", "Spacing Y (m)", "number"],
+                  ["spacingX", "Spot Spacing X (m)", "number"],
+                  ["spacingY", "Spot Spacing Y (m)", "number"],
                   ["payloadTonnes", "Payload (tonnes)", "number"],
                 ] as [keyof typeof customForm, string, string][]).map(([field, label, type]) => (
                   <div key={field}>
-                    <label className="text-muted-foreground block mb-0.5">{label}</label>
+                    <label className="text-muted-foreground block mb-0.5">
+                      {label}
+                      {(field === "spacingX" || field === "spacingY") && (
+                        <span className="text-primary/60 ml-1">(auto-set from dimensions)</span>
+                      )}
+                    </label>
                     <input type={type} value={(customForm as any)[field]}
-                      onChange={(e) => setCustomForm((prev) => ({
-                        ...prev, [field]: type === "number" ? Number(e.target.value) : e.target.value,
-                      }))}
+                      onChange={(e) => {
+                        const val = type === "number" ? Number(e.target.value) : e.target.value;
+                        setCustomForm((prev) => {
+                          const next = { ...prev, [field]: val };
+                          if (field === "width" || field === "length") {
+                            const w = field === "width" ? (val as number) : prev.width;
+                            const l = field === "length" ? (val as number) : prev.length;
+                            if (w > 0 && l > 0) {
+                              const s = Math.round(Math.max(w * 1.5, l) * 10) / 10;
+                              next.spacingX = s;
+                              next.spacingY = s;
+                            }
+                          }
+                          return next;
+                        });
+                      }}
                       className="w-full bg-secondary border border-border rounded px-2 py-1 font-mono text-foreground focus:border-primary outline-none"
                       placeholder={type === "number" ? "0" : "My Truck"} />
                   </div>
