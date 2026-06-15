@@ -573,6 +573,7 @@ export default function PlannerTab() {
             onCanvasClick={handleCanvasClick}
             onSpotClick={(s) => setTooltip({ spot: s })}
             sweepAngle={sweeping ? sweepAngle : null}
+            truckWidth={selectedTruck.width}
           />
 
           <AnimatePresence>

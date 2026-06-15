@@ -859,6 +859,7 @@ export default function MapTab() {
                     isClosed
                     sweepAngle={sweeping ? sweepAngle : null}
                     readOnly
+                    truckWidth={truck.width}
                   />
                 )}
               </div>

@@ -21,6 +21,7 @@ interface Props {
   readOnly?: boolean;
   simulationMode?: boolean;
   sweepAngle?: number | null;
+  truckWidth?: number;
 }
 
 function computeTransform(polyPts: Pt[], width: number, height: number, pad = 56) {
@@ -64,6 +65,7 @@ export default function PackingCanvas({
   readOnly = false,
   simulationMode = false,
   sweepAngle = null,
+  truckWidth = 9,
 }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const hoveredRef   = useRef<number | null>(null);
@@ -131,7 +133,7 @@ export default function PackingCanvas({
 
     const laneColorMap = new Map<number, string>();
     for (const l of lanes) laneColorMap.set(l.id, LANE_COLORS[l.id % LANE_COLORS.length]);
-    const spotR = Math.max(4, Math.min(12, scale * 5));
+    const spotR = Math.max(3, Math.min(16, scale * (truckWidth / 2)));
 
     for (const s of spots) {
       const tp = tx(s);
@@ -232,23 +234,23 @@ export default function PackingCanvas({
     const { cx, cy } = getXY(e);
 
     if (spots.length > 0 && isClosed) {
-      const { scale, offsetX, offsetY } = transformRef.current;
-      const sr = Math.max(4, Math.min(12, scale * 5)) + 6;
+      const { scale: sc, offsetX: ox, offsetY: oy } = transformRef.current;
+      const sr = Math.max(3, Math.min(16, sc * (truckWidth / 2))) + 5;
       for (const s of spots) {
-        const sx = s.x * scale + offsetX, sy = s.y * scale + offsetY;
+        const sx = s.x * sc + ox, sy = s.y * sc + oy;
         if (Math.hypot(cx - sx, cy - sy) <= sr) { onSpotClick?.(s); return; }
       }
     }
 
     const local = screenToLocal(cx, cy);
     onCanvasClick?.(local.x, local.y);
-  }, [readOnly, spots, isClosed, getXY, screenToLocal, onCanvasClick, onSpotClick]);
+  }, [readOnly, spots, isClosed, truckWidth, getXY, screenToLocal, onCanvasClick, onSpotClick]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (spots.length === 0) return;
     const { cx, cy } = getXY(e);
     const { scale, offsetX, offsetY } = transformRef.current;
-    const sr = Math.max(4, Math.min(12, scale * 5)) + 6;
+    const sr = Math.max(3, Math.min(16, scale * (truckWidth / 2))) + 5;
     let found: number | null = null;
     for (const s of spots) {
       if (Math.hypot(cx - (s.x * scale + offsetX), cy - (s.y * scale + offsetY)) <= sr) { found = s.id; break; }

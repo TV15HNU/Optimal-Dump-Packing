@@ -335,6 +335,7 @@ export default function SimulationTab() {
             activeSpotId={activeId}
             simulationMode
             readOnly
+            truckWidth={activeTruck.width}
           />
         </div>
 
