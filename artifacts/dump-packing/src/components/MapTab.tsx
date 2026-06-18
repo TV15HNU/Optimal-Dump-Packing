@@ -308,7 +308,7 @@ export default function MapTab() {
 
   // Active polygon for optimization
   const activePts: GpsPt[] = gpsPts.length >= 3 ? gpsPts : parsedManual;
-  const mapDisplayPts: GpsPt[] = gpsPts.length > 0 ? gpsPts : parsedManual;
+  const mapDisplayPts: GpsPt[] = gpsPts.length >= 3 ? gpsPts : parsedManual;
   const hasPts = activePts.length >= 3;
 
   // Convert final spots → GPS for Leaflet overlay
@@ -395,8 +395,9 @@ export default function MapTab() {
   const handleManualChange = useCallback((text: string) => {
     setManualInput(text);
     const parsed = text.trim().split("\n")
+      .filter((line) => line.trim().length > 0)
       .map((line) => {
-        const parts = line.split(",");
+        const parts = line.trim().split(/[\s,]+/).filter(Boolean);
         const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
         return { lat, lng };
       })
